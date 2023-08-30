@@ -1,0 +1,14 @@
+openvino-dev==2023.1.0.dev20230811
+openvino==2023.1.0.dev20230811
+git+https://github.com/eaidova/optimum-intel.git@ea/pt_fe
+git+https://github.com/openvinotoolkit/nncf.git
+torch
+torchvision
+numpy==1.23.5
+transformers
+tokenizers==0.13.3
+diffusers
+pillow
+tiktoken
+onnx==1.14.0
+protobuf==4.23.4
