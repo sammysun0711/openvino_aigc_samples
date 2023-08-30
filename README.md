@@ -69,6 +69,3 @@ Run Stable Diffusion OpenVINO INT8 Model using Model Cache
 python run_sd.py -c stable-diffusion-v1-5/openvino/INT8 -p ”A cute cat" -d GPU --cache_dir model_cache
 ```
 
-
-
-
