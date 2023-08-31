@@ -6,26 +6,31 @@ Here is the example for LlaMA model conversion and inference with OpenVINO runti
 conda create -n aigc python=3.10
 conda activate aigc
 pip install -r ../requirements.txt
+sudo apt-get install git-lfs
+```
+## 2. Donwload Pytorch Model with GIT LFS
+```bash
+git clone https://huggingface.co/ziqingyang/chinese-alpaca-2-7b
 ```
 
-## 2. Convert Pytorch Model to OpenVINO Model
+## 3. Convert Pytorch Model to OpenVINO Model
 Convert Pytorch Model to OpenVINO FP32 Model
 ```python
-python ../Tools/convert.py --model_id ziqingyang/chinese-alpaca-2-7b \
-    --output_dir LlaMA/chinese-alpaca-2-7b --precision FP32
+python ../Tools/convert.py --model_id chinese-alpaca-2-7b \
+    --output_dir chinese-alpaca-2-7b --precision FP32
 ```
 Convert Pytorch Model to OpenVINO FP16 Model
 ```python
-python ../Tools/convert.py --model_id ziqingyang/chinese-alpaca-2-7b \
-    --output_dir LlaMA/chinese-alpaca-2-7b --precision FP16
+python ../Tools/convert.py --model_id chinese-alpaca-2-7b \
+    --output_dir chinese-alpaca-2-7b --precision FP16
 ```
 Convert Pytorch Model to OpenVINO INT8 Model with Weight Only Compression
 ```python
-python ../Tools/convert.py --model_id ziqingyang/chinese-alpaca-2-7b \
-    --output_dir LlaMA/chinese-alpaca-2-7b --precision FP16 --compress_weights
+python ../Tools/convert.py --model_id chinese-alpaca-2-7b \
+    --output_dir chinese-alpaca-2-7b --precision FP16 --compress_weights
 ```
 
-## 3. Run inference with LlaMA OpenVINO Model
+## 4. Run inference with LlaMA OpenVINO Model
 Run LlaMA OpenVINO FP32 Model on Intel CPU
 ```python
 python run_llm.py -c chinese-alpaca-2-7b/openvino/FP32 \
@@ -42,7 +47,7 @@ python run_llm.py -c chinese-alpaca-2-7b/openvino/INT8 \
     -p ”为什么北京是中国的首都？" -d GPU.1 --cache_dir model_cache
 ```
 
-## 4. Run benchmark with LlaMA OpenVINO Model
+## 5. Run benchmark with LlaMA OpenVINO Model
 Run benchmark with LlaMA OpenVINO FP32 Model on CPU
 ```python
 python benchmark_llm.py -c chinese-alpaca-2-7b/openvino/FP32 -d CPU \
