@@ -9,8 +9,8 @@ pip install -r requirements.txt
 ```
 
 ## Supported AIGC Samples
-| Model Name  | Original Model | Sample Code  |
-|---|---|---|
+|  Model Name  | Original Model | Sample Code  |
+|:------------:|:--------------:|:------------:|
 | LlaMA   | [LlaMA](https://huggingface.co/huggyllama) | [LlaMA Samples](https://github.com/sammysun0711/OpenVINO_AIGC_Samples/tree/main/LlaMA)  |
 | LlaMA2  | [LlaMA2](https://huggingface.co/meta-llama) | [LlaMA Samples](https://github.com/sammysun0711/OpenVINO_AIGC_Samples/tree/main/LlaMA)  |
 | Chinese-LLaMA-Alpaca  | [Chinese-LLaMA-Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca) | [LlaMA Samples](https://github.com/sammysun0711/OpenVINO_AIGC_Samples/tree/main/LlaMA) |
