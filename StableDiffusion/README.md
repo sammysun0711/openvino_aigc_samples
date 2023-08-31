@@ -11,17 +11,17 @@ pip install -r ../requirements.txt
 Convert Pytorch Model to OpenVINO FP32 Model
 ```python
 python ../Tools/convert.py --model_id runwayml/stable-diffusion-v1-5 \
-    --output_dir StableDiffusion/stable-diffusion-v1-5 --precision FP32
+    --output_dir stable-diffusion-v1-5 --precision FP32
 ```
 Convert Pytorch Model to OpenVINO FP16 Model
 ```python
 python ../Tools/convert.py --model_id runwayml/stable-diffusion-v1-5 \
-    --output_dir StableDiffusion/stable-diffusion-v1-5 --precision FP16
+    --output_dir stable-diffusion-v1-5 --precision FP16
 ```
 Convert Pytorch Model to OpenVINO INT8 Model with Weight Only Compression
 ```python
 python ../Tools/convert.py --model_id runwayml/stable-diffusion-v1-5 \
-    --output_dir StableDiffusion/stable-diffusion-v1-5 --precision FP16 --compress_weights
+    --output_dir stable-diffusion-v1-5 --precision FP16 --compress_weights
 ```
 
 ## 3. Run inference with Stable Diffusion OpenVINO Model
