@@ -34,17 +34,17 @@ python ../Tools/convert.py --model_id chinese-alpaca-2-7b \
 Run LlaMA OpenVINO FP32 Model on Intel CPU
 ```python
 python run_llm.py -c chinese-alpaca-2-7b/openvino/FP32 \
-    -p ”为什么北京是中国的首都？" -d CPU
+    -p "为什么北京是中国的首都？" -d CPU
 ```
 Run LlaMA OpenVINO FP16 Model on Intel iGPU using Model Cache
 ```python
 python run_llm.py -c chinese-alpaca-2-7b/openvino/FP16 \
-    -p ”为什么北京是中国的首都？" -d GPU.0 --cache_dir model_cache
+    -p "为什么北京是中国的首都？" -d GPU.0 --cache_dir model_cache
 ```
 Run LlaMA OpenVINO INT8 Model on Intel dGPU using Model Cache
 ```python
 python run_llm.py -c chinese-alpaca-2-7b/openvino/INT8 \
-    -p ”为什么北京是中国的首都？" -d GPU.1 --cache_dir model_cache
+    -p "为什么北京是中国的首都？" -d GPU.1 --cache_dir model_cache
 ```
 
 ## 5. Run benchmark with LlaMA OpenVINO Model
