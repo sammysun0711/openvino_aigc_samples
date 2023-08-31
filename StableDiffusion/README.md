@@ -34,15 +34,15 @@ python ../Tools/convert.py --model_id stable-diffusion-v1-5 \
 ## 4. Run inference with Stable Diffusion OpenVINO Model
 Run Stable Diffusion OpenVINO FP32 Model on Intel CPU
 ```python
-python run_sd.py -c stable-diffusion-v1-5/openvino/FP32 -p ”A cute cat" -d CPU
+python run_sd.py -c stable-diffusion-v1-5/openvino/FP32 -p "A cute cat" -d CPU
 ```
 Run Stable Diffusion OpenVINO FP16 Model on Intel iGPU with static shape using model cache 
 ```python
-python run_sd.py -c stable-diffusion-v1-5/openvino/FP16 -p ”A cute cat" -d GPU.0 \
+python run_sd.py -c stable-diffusion-v1-5/openvino/FP16 -p "A cute cat" -d GPU.0 \
      --static_shape --cache_dir model_cache
 ```
 Run Stable Diffusion OpenVINO INT8 Model on Intel dGPU with static shape using Model Cache
 ```python
-python run_sd.py -c stable-diffusion-v1-5/openvino/INT8 -p ”A cute cat" -d GPU.1 \
+python run_sd.py -c stable-diffusion-v1-5/openvino/INT8 -p "A cute cat" -d GPU.1 \
     --static_shape --cache_dir model_cache
 ```
