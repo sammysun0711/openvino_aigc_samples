@@ -6,6 +6,7 @@ This repo provieds OpenVINO Samples for Popular AIGC Applications, including mod
 conda create -n aigc python=3.10
 conda activate aigc
 pip install -r requirements.txt
+sudo apt-get install git-lfs
 ```
 
 ## Supported AIGC Samples
