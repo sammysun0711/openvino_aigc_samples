@@ -1,7 +1,7 @@
 # LlaMA
-Here is the example for LlaMA model conversion and inference with OpenVINO.
+Here is the example for LlaMA model conversion and inference with OpenVINO runtime.
 
-## 1.Setup Environment
+## 1. Setup Environment
 ```bash
 conda create -n aigc python=3.10
 conda activate aigc
@@ -34,4 +34,10 @@ python run_llm.py -c chinese-alpaca-2-7b/openvino/FP16 -p ”为什么北京是�
 Run LlaMA OpenVINO INT8 Model on GPU using Model Cache
 ```python
 python run_llm.py -c chinese-alpaca-2-7b/openvino/INT8 -p ”为什么北京是中国的首都？" -d GPU --cache_dir model_cache
+```
+
+## 4. Run benchmark with LlaMA OpenVINO Model
+Run benchmark with LlaMA OpenVINO FP32 Model on CPU
+```python
+python benchmark_llm.py -c chinese-alpaca-2-7b/openvino/FP32 -d CPU --cache_dir model_cache
 ```
