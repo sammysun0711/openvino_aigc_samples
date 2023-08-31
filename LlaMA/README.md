@@ -33,7 +33,7 @@ python ../Tools/convert.py --model_id chinese-alpaca-2-7b \
 ## 4. Run inference with LlaMA OpenVINO Model
 Run LlaMA OpenVINO FP32 Model on Intel CPU
 ```python
-python run_llm.py -c chinese-alpaca-2-7b/FP32 \
+python run_llm.py -c chinese-alpaca-2-7b-ov/FP32 \
     -p "为什么北京是中国的首都？" -d CPU
 ```
 Run LlaMA OpenVINO FP16 Model on Intel iGPU using Model Cache
