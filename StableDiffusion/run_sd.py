@@ -53,7 +53,7 @@ if __name__ == "__main__":
     # Compile the model before the first inference
     if "GPU" in args.device:
         pipeline.half()
-        pipeline.to(args.device.lower())
+    pipeline.to(args.device.lower())
     pipeline.compile()
     model_init_latency = time.time() - model_init_start
     print(f"Initialize stable diffusion pipeline took {model_init_latency:.3f} s")
