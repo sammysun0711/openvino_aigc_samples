@@ -29,7 +29,7 @@ def convert_causal_lm(args):
          pt_model = AutoModelForCausalLM.from_pretrained(args.model_id, trust_remote_code=True, config=AutoConfig.from_pretrained(args.model_id, trust_remote_code=True))
          feature = "text-generation"
          quantizer = OVQuantizer.from_pretrained(pt_model, task=feature)
-         ov_out_dir = Path(args.output_dir) / "openvino" / "INT8"
+         ov_out_dir = Path(args.output_dir) / "INT8"
          quantizer.quantize(save_directory=ov_out_dir, weights_only=True)
          try:
             tok.save_pretrained(ov_out_dir)
@@ -42,7 +42,7 @@ def convert_causal_lm(args):
     start1 = time.perf_counter()
     if args.precision == "FP16":
         model.half()
-    ov_out_dir = Path(args.output_dir) / "openvino" / args.precision
+    ov_out_dir = Path(args.output_dir) / args.precision
     model.save_pretrained(ov_out_dir)
     end1 = time.perf_counter()
     print(f"Serialization total time {end1 - start1}s")
@@ -71,7 +71,7 @@ def convert_sd(args):
             custom_onnx_configs={},
             custom_architecture=False,
         )
-        output = Path(args.output_dir) / "openvino" / "INT8"
+        output = Path(args.output_dir) / "INT8"
         for model_name in models_and_onnx_configs:
             subcomponent = models_and_onnx_configs[model_name][0]
             if hasattr(subcomponent, "save_config"):
@@ -110,7 +110,7 @@ def convert_sd(args):
     end = time.perf_counter()
     print(f"Conversion total time {end - start}s")
     start1 = time.perf_counter()
-    model.save_pretrained(Path(args.output_dir) / "openvino" / args.precision)
+    model.save_pretrained(Path(args.output_dir) / args.precision)
     end1 = time.perf_counter()
     print(f"Serialization total time {end1 - start1}s")
 
