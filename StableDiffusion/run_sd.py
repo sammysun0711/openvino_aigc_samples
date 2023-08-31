@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument('-p','--prompt', type=str, default="Sailing ship in storm by Rembrandt", required=False,
                          help="Specify input prompt. Default is 'Sailing ship in storm by Rembrandt'")  
     parser.add_argument('-cd', '--cache_dir', type=str, default="model_cache", required=False,
-                         help="Specify maximum number of new tokens to be generated.")
+                         help="Specify save directory of OpenVINO model cache, model cache can be disable by setting ''.")
     parser.add_argument('-sd', '--seed', type=int, required=False,
                          help="Specify random seeds for image generation")
     parser.add_argument('--static_shape', action="store_true",

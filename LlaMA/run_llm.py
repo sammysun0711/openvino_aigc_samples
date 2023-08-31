@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument('-mnt', '--max_new_tokens', type=int, default=128, required=False,
                          help="Specify maximum number of new tokens to be generated.")
     parser.add_argument('-cd', '--cache_dir', type=str, default="model_cache", required=False,
-                         help="Specify save directory of OpenVINO model cache")
+                         help="Specify save directory of OpenVINO model cache, model cache can be disable by setting ''")
     # Parse the argument
     args = parser.parse_args()
 
