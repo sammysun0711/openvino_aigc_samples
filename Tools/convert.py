@@ -65,11 +65,11 @@ def convert_sd(args):
         pt_model.unet = wc_unet
         pt_model.vae = wc_vae
         onnx_config, models_and_onnx_configs = optimum_main._get_submodels_and_onnx_configs(
-        model=pt_model,
-        task="stable-diffusion",
-        monolith=False,
-        custom_onnx_configs={},
-        custom_architecture=False,
+            model=pt_model,
+            task="stable-diffusion",
+            monolith=False,
+            custom_onnx_configs={},
+            custom_architecture=False,
         )
         output = Path(args.output_dir) / "openvino" / "INT8"
         for model_name in models_and_onnx_configs:
