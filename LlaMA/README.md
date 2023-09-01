@@ -5,7 +5,7 @@ Here is the example for LlaMA model conversion and inference with OpenVINO runti
 ```bash
 conda create -n aigc python=3.10
 conda activate aigc
-pip install -r ../requirements.txt
+pip install -r ../requirements.txt --force-reinstall
 sudo apt-get install git-lfs
 ```
 ## 2. Donwload Pytorch Model with GIT LFS
