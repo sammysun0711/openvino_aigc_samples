@@ -5,7 +5,7 @@ Here is the example for Stable Diffusion model conversion and inference with Ope
 ```bash
 conda create -n aigc python=3.10
 conda activate aigc
-pip install -r ../requirements.txt
+pip install -r ../requirements.txt --force-reinstall
 sudo apt-get install git-lfs
 ```
 
