@@ -3,9 +3,9 @@ Here is the example for Stable Diffusion model conversion and inference with Ope
 
 ## 1. Setup Environment
 ```bash
-conda create -n aigc python=3.10
-conda activate aigc
-pip install -r ../requirements.txt --force-reinstall
+conda create -n stable_diffusion python=3.10
+conda activate stable_diffusion
+pip install -r requirements.txt --force-reinstall
 sudo apt-get install git-lfs
 ```
 
@@ -17,17 +17,17 @@ git clone https://huggingface.co/runwayml/stable-diffusion-v1-5
 ## 3. Convert Pytorch Model to OpenVINO Model
 Convert Pytorch Model to OpenVINO FP32 Model
 ```python
-python ../Tools/convert.py --model_id stable-diffusion-v1-5 \
+python ../tools/convert.py --model_id stable-diffusion-v1-5 \
     --output_dir stable-diffusion-v1-5-ov --precision FP32
 ```
 Convert Pytorch Model to OpenVINO FP16 Model
 ```python
-python ../Tools/convert.py --model_id stable-diffusion-v1-5 \
+python ../tools/convert.py --model_id stable-diffusion-v1-5 \
     --output_dir stable-diffusion-v1-5-ov --precision FP16
 ```
 Convert Pytorch Model to OpenVINO INT8 Model with Weight Only Compression
 ```python
-python ../Tools/convert.py --model_id stable-diffusion-v1-5 \
+python ../tools/convert.py --model_id stable-diffusion-v1-5 \
     --output_dir stable-diffusion-v1-5-ov --precision FP16 --compress_weights
 ```
 

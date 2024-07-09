@@ -12,46 +12,6 @@ from nncf import compress_weights
 from diffusers import StableDiffusionPipeline
 import time
 
-def convert_causal_lm(args):
-    tok = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
-    start = time.perf_counter()
-    if args.save_orig:
-        pt_out_dir = Path(args.output_dir) / "pytorch"
-        pt_model = AutoModelForCausalLM.from_pretrained(args.model_id, trust_remote_code=True, config=AutoConfig.from_pretrained(args.model_id, trust_remote_code=True))
-        pt_model.save_pretrained(pt_out_dir)
-        try:
-            tok.save_pretrained(pt_out_dir)
-        except Exception:
-            print("tokenizer loading failed")
-        del pt_model
-        gc.collect()
-    if args.compress_weights:
-         pt_model = AutoModelForCausalLM.from_pretrained(args.model_id, trust_remote_code=True, config=AutoConfig.from_pretrained(args.model_id, trust_remote_code=True))
-         feature = "text-generation"
-         quantizer = OVQuantizer.from_pretrained(pt_model, task=feature)
-         ov_out_dir = Path(args.output_dir) / "INT8"
-         quantizer.quantize(save_directory=ov_out_dir, weights_only=True)
-         try:
-            tok.save_pretrained(ov_out_dir)
-         except Exception:
-            print("tokenizer loading failed")
-
-    model = OVModelForCausalLM.from_pretrained(args.model_id, export=True, compile=False, trust_remote_code=True, config=AutoConfig.from_pretrained(args.model_id, trust_remote_code=True))
-    end = time.perf_counter()
-    print(f"Conversion total time {end - start}s")
-    start1 = time.perf_counter()
-    if args.precision == "FP16":
-        model.half()
-    ov_out_dir = Path(args.output_dir) / args.precision
-    model.save_pretrained(ov_out_dir)
-    end1 = time.perf_counter()
-    print(f"Serialization total time {end1 - start1}s")
-
-    try:
-        tok.save_pretrained(ov_out_dir)
-    except Exception:
-        print("tokenizer loading failed")
-
 def convert_sd(args):
     start = time.perf_counter()
     pt_model = StableDiffusionPipeline.from_pretrained(args.model_id) if args.save_orig or args.compress_weights else None
@@ -114,19 +74,6 @@ def convert_sd(args):
     end1 = time.perf_counter()
     print(f"Serialization total time {end1 - start1}s")
 
-converters = {
-    "decoder": convert_causal_lm,
-    "stable-diffusion": convert_sd,
-}
-
-def get_convert_model_type(model_id):
-    default = "decoder"
-    for key in converters:
-        if key in model_id:
-            return key
-        
-    return default
-
 def main():
     parser = ArgumentParser()
     parser.add_argument("--model_id", required=True, 
@@ -141,9 +88,6 @@ def main():
                         help="Whether quantize Model to INT8 model with compress only method or not")
 
     args = parser.parse_args()
-    model_type = get_convert_model_type(args.model_id)
-    converter = converters[model_type]
-    converter(args)
-
+    convert_sd(args)
 if __name__ == "__main__":
     main()

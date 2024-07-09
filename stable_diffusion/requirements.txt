@@ -1,14 +1,12 @@
-openvino-dev==2023.1.0
-openvino==2023.1.0
+openvino-dev>=2024.2.0
+openvino==2024.2.0
 git+https://github.com/huggingface/optimum-intel.git
 git+https://github.com/openvinotoolkit/nncf.git
 torch
 torchvision
 numpy==1.23.5
 transformers
-tokenizers==0.13.3
+tokenizers
 diffusers
 pillow
 tiktoken
-onnx==1.14.0
-protobuf==4.23.4
