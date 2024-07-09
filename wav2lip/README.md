@@ -1,5 +1,27 @@
 # **Wav2Lip**: *Accurately Lip-syncing Videos In The Wild* 
+This sample based on orginal [wav2lip repo](https://github.com/Rudrabha/Wav2Lip) to introduce how to deploy wav2lip pipeline with OpenVINO as follow
+- Support Pytorch model to OpenVINO model conversion
+- Build wav2lip pipeline with OpenVINO
+#### 1. Setup envirnoment
+```bash
+conda create -n wav2lip python=3.8
+conda activate wav2lip
+pip install -r requirments.txt
+sudo apt-get install ffmpeg
+```
+#### 2. Download Wav2lip model from [Link](https://iiitaphyd-my.sharepoint.com/:u:/g/personal/radrabha_m_research_iiit_ac_in/Eb3LEzbfuKlJiR600lQWRxgBIY27JZg80f7V9jtMfbNDaQ?e=TBFBVW) and move to checkpoints folder
 
+#### 3. Convert pytorch face detection model and wav2lip model to OpenVINO model
+```python
+python export_openvino.py
+```
+
+#### 4. Run wav2lip inference with OpenVINO
+```python
+python inference_ov.py --face_detection_path checkpoints/face_detection.xml --wav2lip_path checkpoints/wav2lip.xml --inference_device CPU --face data_video_sun_5s.mp4 --audio data_audio_sun_5s.wav
+```
+
+The generated video will be saved as `results/result_voice.mp4`
 ### Wav2Lip is hosted for free at [Sync Labs](https://synclabs.so/)
 
 Are you looking to integrate this into a product? We have a turn-key hosted API with new and improved lip-syncing models here: https://synclabs.so/
