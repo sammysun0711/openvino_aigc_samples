@@ -509,6 +509,7 @@ class OVAnimationPipeline(DiffusionPipeline):
         unet: Union[str, ov.Model],
         vae_decoder: Union[str, ov.Model],
     ):
+        print("Compile OpenVINO Model ...")
         self.text_encoder = core.compile_model(text_encoder, device)
         self.text_encoder_out = self.text_encoder.output(0)
         self.register_to_config(controlnet=core.compile_model(controlnet, device))
@@ -542,13 +543,9 @@ class OVAnimationPipeline(DiffusionPipeline):
         #else:
         #    attention_mask = None
         attention_mask = None
-        print("text_input_ids.shape: ", text_input_ids.shape)
         text_encoder_inputs = {"input_ids": text_input_ids.cpu().numpy()}
-        print("input data text_encoder_inputs: ", text_encoder_inputs)
         print("Run text embedding with OpenVINO ...")
-        print("self.text_encoder.inputs: ", self.text_encoder.inputs)
         text_embeddings = self.text_encoder(text_encoder_inputs)[self.text_encoder_out]
-        print("openvino text_emeddbings: ", text_embeddings)
         text_embeddings = torch.Tensor(text_embeddings)
 
         # duplicate text embeddings for each generation per prompt, using mps friendly method
@@ -596,7 +593,6 @@ class OVAnimationPipeline(DiffusionPipeline):
             text_encoder_inputs = {"input_ids": uncond_input.input_ids.cpu().numpy()}
             print("Run text embedding with OpenVINO ...")
             uncond_embeddings = self.text_encoder(text_encoder_inputs)[self.text_encoder_out]
-            print("openvino text_emeddbings: ", text_embeddings)
             uncond_embeddings = torch.Tensor(uncond_embeddings)
             """
             uncond_embeddings = self.text_encoder(
@@ -814,7 +810,6 @@ class OVAnimationPipeline(DiffusionPipeline):
                                            "conditioning_mask": controlnet_conditioning_mask.cpu().numpy()}
                     result = self.controlnet(ov_controlnet_input)
                     down_and_mid_blok_samples = [sample * controlnet_conditioning_scale for _, sample in result.items()]
-                    print("down_and_mid_blok_samples[0].shape: ", down_and_mid_blok_samples[0].shape)
 
                 print("Run unet openvino model inference ...")
                 ov_unet_inputs = {"sample": latent_model_input.cpu().numpy(),

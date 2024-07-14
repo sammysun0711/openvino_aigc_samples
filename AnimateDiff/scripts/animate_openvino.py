@@ -20,7 +20,6 @@ from animatediff.pipelines.pipeline_animation import TEXT_ENCODER_OV_PATH, VAE_E
 
 from animatediff.utils.util import save_videos_grid
 from animatediff.utils.util import load_weights
-from diffusers.utils.import_utils import is_xformers_available
 
 from einops import rearrange, repeat
 
@@ -52,19 +51,20 @@ def main(args):
         model_config.L = model_config.get("L", args.L)
 
         inference_config = OmegaConf.load(model_config.get("inference_config", args.inference_config))
-        #unet = UNet3DConditionModel.from_pretrained_2d(args.pretrained_model_path, subfolder="unet", unet_additional_kwargs=OmegaConf.to_container(inference_config.unet_additional_kwargs)).cpu()
+        # unet = UNet3DConditionModel.from_pretrained_2d(args.pretrained_model_path, subfolder="unet", unet_additional_kwargs=OmegaConf.to_container(inference_config.unet_additional_kwargs)).cpu()
+        unet = UNet3DConditionModel()
         # load controlnet model
         controlnet = controlnet_images = None
         if model_config.get("controlnet_path", "") != "":
             assert model_config.get("controlnet_images", "") != ""
             assert model_config.get("controlnet_config", "") != ""
             
-            #unet.config.num_attention_heads = 8
-            #unet.config.projection_class_embeddings_input_dim = None
+            unet.config.num_attention_heads = 8
+            unet.config.projection_class_embeddings_input_dim = None
 
-            #controlnet_config = OmegaConf.load(model_config.controlnet_config)
-            #controlnet = SparseControlNetModel.from_unet(unet, controlnet_additional_kwargs=controlnet_config.get("controlnet_additional_kwargs", {}))
-            #print(f"loading controlnet checkpoint from {model_config.controlnet_path} ...")
+            controlnet_config = OmegaConf.load(model_config.controlnet_config)
+            controlnet = SparseControlNetModel.from_unet(unet, load_weights_from_unet=False, controlnet_additional_kwargs=controlnet_config.get("controlnet_additional_kwargs", {}))
+            print(f"loading controlnet checkpoint from {model_config.controlnet_path} ...")
             #controlnet_state_dict = torch.load(model_config.controlnet_path, map_location="cpu")
             #controlnet_state_dict = controlnet_state_dict["controlnet"] if "controlnet" in controlnet_state_dict else controlnet_state_dict
             #controlnet_state_dict.pop("animatediff_config", "")
@@ -108,7 +108,6 @@ def main(args):
                 vae_encoder = core.compile_model(VAE_ENCODER_OV_PATH, inference_device)
                 vae_encoder_inputs = {"image": controlnet_images.cpu().numpy() * 2. - 1.}
                 controlnet_images = vae_encoder(vae_encoder_inputs)[vae_encoder.output(0)] * 0.18215
-                #controlnet_images = vae.encode(controlnet_images * 2. - 1.).latent_dist.sample() * 0.18215
                 controlnet_images = torch.Tensor(controlnet_images)
                 controlnet_images = rearrange(controlnet_images, "(b f) c h w -> b c f h w", f=num_controlnet_images)
 

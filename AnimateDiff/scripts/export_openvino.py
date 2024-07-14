@@ -22,7 +22,6 @@ from animatediff.pipelines.pipeline_animation import TEXT_ENCODER_OV_PATH, VAE_E
 
 from animatediff.utils.util import save_videos_grid
 from animatediff.utils.util import load_weights
-from diffusers.utils.import_utils import is_xformers_available
 
 from einops import rearrange, repeat
 
@@ -298,15 +297,18 @@ def main(args):
     tokenizer    = CLIPTokenizer.from_pretrained(args.pretrained_model_path, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_path, subfolder="text_encoder").cpu()
     if not TEXT_ENCODER_OV_PATH.exists():
+        print(f"Convert Text Encoder Pytorch Model to OpenVINO IR, and save as {TEXT_ENCODER_OV_PATH} ...")
         convert_encoder(text_encoder, TEXT_ENCODER_OV_PATH)
     else:
         print(f"Text encoder will be loaded from {TEXT_ENCODER_OV_PATH}")
     vae          = AutoencoderKL.from_pretrained(args.pretrained_model_path, subfolder="vae").cpu()
     if not VAE_ENCODER_OV_PATH.exists():
+        print(f"Convert VAE Encoder Pytorch Model to OpenVINO IR, and save as {VAE_ENCODER_OV_PATH} ...")
         convert_vae_encoder(vae, VAE_ENCODER_OV_PATH)
     else:
         print(f"VAE encoder will be loaded from {VAE_ENCODER_OV_PATH}")
     if not VAE_DECODER_OV_PATH.exists():
+        print(f"Convert VAE Decoder Pytorch Model to OpenVINO IR, and save as {VAE_DECODER_OV_PATH} ...")
         convert_vae_decoder(vae, VAE_DECODER_OV_PATH)
     else:
         print(f"VAE decoder will be loaded from {VAE_DECODER_OV_PATH}")
@@ -317,7 +319,6 @@ def main(args):
         model_config.L = model_config.get("L", args.L)
 
         inference_config = OmegaConf.load(model_config.get("inference_config", args.inference_config))
-        #unet = UNet3DConditionModel.from_pretrained_2d(args.pretrained_model_path, subfolder="unet", unet_additional_kwargs=OmegaConf.to_container(inference_config.unet_additional_kwargs)).cuda()
         unet = UNet3DConditionModel.from_pretrained_2d(args.pretrained_model_path, subfolder="unet", unet_additional_kwargs=OmegaConf.to_container(inference_config.unet_additional_kwargs)).cpu()
         # load controlnet model
         controlnet = controlnet_images = None
@@ -365,7 +366,6 @@ def main(args):
             for i, image in enumerate(controlnet_images):
                 Image.fromarray((255. * (image.numpy().transpose(1,2,0))).astype(np.uint8)).save(f"{savedir}/control_images/{i}.png")
 
-            #controlnet_images = torch.stack(controlnet_images).unsqueeze(0).cuda()
             controlnet_images = torch.stack(controlnet_images).unsqueeze(0).cpu()
             controlnet_images = rearrange(controlnet_images, "b f c h w -> b c f h w")
 
@@ -374,11 +374,6 @@ def main(args):
                 controlnet_images = rearrange(controlnet_images, "b c f h w -> (b f) c h w")
                 controlnet_images = vae.encode(controlnet_images * 2. - 1.).latent_dist.sample() * 0.18215
                 controlnet_images = rearrange(controlnet_images, "(b f) c h w -> b c f h w", f=num_controlnet_images)
-
-        # set xformers
-        if is_xformers_available() and (not args.without_xformers):
-            unet.enable_xformers_memory_efficient_attention()
-            if controlnet is not None: controlnet.enable_xformers_memory_efficient_attention()
 
         pipeline = AnimationPipeline(
             vae=vae, text_encoder=text_encoder, tokenizer=tokenizer, unet=unet,
@@ -402,57 +397,16 @@ def main(args):
 
         down_block_additional_residuals, mid_block_additional_residual = None, None
         if not CONTROLNET_OV_PATH.exists():
+            print(f"Convert ControlNet Pytorch Model to OpenVINO IR, and save as {CONTROLNET_OV_PATH} ...")
             down_block_additional_residuals, mid_block_additional_residual = convert_controlnet(pipeline.controlnet, CONTROLNET_OV_PATH)
         else:
             print(f"Controlnet will be loaded from {CONTROLNET_OV_PATH}")
 
         if not UNET_OV_PATH.exists():
+            print(f"Convert UNet Pytorch Model to OpenVINO IR, and save as {UNET_OV_PATH} ...")
             convert_unet(pipeline.unet, UNET_OV_PATH, down_block_additional_residuals, mid_block_additional_residual)
         else:
-            print(f"Unet will be loaded from {UNET_OV_PATH}")
-
-        prompts      = model_config.prompt
-        n_prompts    = list(model_config.n_prompt) * len(prompts) if len(model_config.n_prompt) == 1 else model_config.n_prompt
-        
-        random_seeds = model_config.get("seed", [-1])
-        random_seeds = [random_seeds] if isinstance(random_seeds, int) else list(random_seeds)
-        random_seeds = random_seeds * len(prompts) if len(random_seeds) == 1 else random_seeds
-        
-        config[model_idx].random_seed = []
-        """
-        for prompt_idx, (prompt, n_prompt, random_seed) in enumerate(zip(prompts, n_prompts, random_seeds)):
-            
-            # manually set random seed for reproduction
-            if random_seed != -1: torch.manual_seed(random_seed)
-            else: torch.seed()
-            config[model_idx].random_seed.append(torch.initial_seed())
-            
-            print(f"current seed: {torch.initial_seed()}")
-            print(f"sampling {prompt} ...")
-            sample = pipeline(
-                prompt,
-                negative_prompt     = n_prompt,
-                num_inference_steps = model_config.steps,
-                guidance_scale      = model_config.guidance_scale,
-                width               = model_config.W,
-                height              = model_config.H,
-                video_length        = model_config.L,
-
-                controlnet_images = controlnet_images,
-                controlnet_image_index = model_config.get("controlnet_image_indexs", [0]),
-            ).videos
-            samples.append(sample)
-
-            prompt = "-".join((prompt.replace("/", "").split(" ")[:10]))
-            save_videos_grid(sample, f"{savedir}/sample/{sample_idx}-{prompt}.gif")
-            print(f"save to {savedir}/sample/{prompt}.gif")
-            
-            sample_idx += 1
-        """
-    #samples = torch.concat(samples)
-    #save_videos_grid(samples, f"{savedir}/sample.gif", n_rows=4)
-
-    #OmegaConf.save(config, f"{savedir}/config.yaml")
+            print(f"UNet will be loaded from {UNET_OV_PATH}")
 
 
 if __name__ == "__main__":
@@ -464,8 +418,6 @@ if __name__ == "__main__":
     parser.add_argument("--L", type=int, default=16 )
     parser.add_argument("--W", type=int, default=512)
     parser.add_argument("--H", type=int, default=512)
-
-    parser.add_argument("--without-xformers", action="store_true")
 
     args = parser.parse_args()
     main(args)
