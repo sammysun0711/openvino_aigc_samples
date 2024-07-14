@@ -23,7 +23,7 @@ Here we put stable-diffusion-v1.5 base model in `models/StableDiffusion`; put mo
 
 ### 3. Convert Pytorch Model to OpenVINO IR:
 ```python
-python -m scripts.export_openvino --config configs/prompts/v3/test.yaml --without-xformers
+python -m scripts.export_openvino --config configs/prompts/v3/test.yaml
 ```
 
 ### 4. Run AnimateDiff Demo with OpenVINO Runtime
