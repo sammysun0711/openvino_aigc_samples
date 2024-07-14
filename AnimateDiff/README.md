@@ -1,7 +1,36 @@
-# AnimateDiff
-
-This repository is the official implementation of [AnimateDiff](https://arxiv.org/abs/2307.04725) [ICLR2024 Spotlight].
+# AnimateDiff V3 Sample with OpenVINO
+This sample introduced a Text-to-Video (T2V) pipeline with model conversion and pipeline optimzaiton with OpenVINO runtime, the  original pipeline [AnimateDiff](https://github.com/guoyww/animatediff) based on the official implementation of [AnimateDiff](https://arxiv.org/abs/2307.04725) [ICLR2024 Spotlight].
 It is a plug-and-play module turning most community models into animation generators, without the need of additional training.
+
+### 1. Setup Environment
+```bash
+$ conda create -n animatediff python=3.10
+$ conda activate animatediff
+$ pip install -r requirements.txt
+```
+
+### 2. Download original Pytorch Model from Hugging Face and move to target directory: 
+  | Name                          | HuggingFace                                                                                | Type                | Storage Space | Description                        | Targe Directory |
+  |-------------------------------|--------------------------------------------------------------------------------------------|---------------------|---------------|------------------------------------|------------------------------------|
+  | `stable-diffusion-v1-5`      | [Link](https://huggingface.co/runwayml/stable-diffusion-v1-5)           | Base Model      | 12 GB       |                                    | models/StableDiffusion | 
+  | `v3_adapter_sd_v15.ckpt`      | [Link](https://huggingface.co/guoyww/animatediff/blob/main/v3_sd15_adapter.ckpt)           | Domain Adapter      | 97.4 MB       |                                    | models/Motion_Module |
+  | `v3_sd15_mm.ckpt.ckpt`           | [Link](https://huggingface.co/guoyww/animatediff/blob/main/v3_sd15_mm.ckpt)              | Motion Module       | 1.56 GB       |                                    | models/Motion_Module |
+  | `v3_sd15_sparsectrl_scribble.ckpt` | [Link](https://huggingface.co/guoyww/animatediff/blob/main/v3_sd15_sparsectrl_scribble.ckpt)    | SparseCtrl Encoder  | 1.86 GB       | scribble condition  | models/SparseCtrl | 
+  | `v3_sd15_sparsectrl_rgb.ckpt`    | [Link](https://huggingface.co/guoyww/animatediff/blob/main/v3_sd15_sparsectrl_rgb.ckpt)       | SparseCtrl Encoder  | 1.85 GB       | RGB image condition | models/SparseCtrl |
+</details>
+
+Here we put stable-diffusion-v1.5 base model in `models/StableDiffusion`; put motion module in `models/Motion_Module`; put SparseCtrl encoders in `models/SparseCtrl`.
+
+### 3. Convert Pytorch Model to OpenVINO IR:
+```python
+python -m scripts.export_openvino --config configs/prompts/v3/test.yaml
+```
+
+### 4. Run AnimateDiff Demo with OpenVINO Runtime
+```python
+python -m scripts.animate_openvino  --config configs/prompts/v3/test.yaml
+```
+----------------------------------------------------------------------------------------------------------------------------
 
 **[AnimateDiff: Animate Your Personalized Text-to-Image Diffusion Models without Specific Tuning](https://arxiv.org/abs/2307.04725)** 
 </br>
