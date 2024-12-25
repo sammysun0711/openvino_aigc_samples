@@ -12,15 +12,22 @@ pip install -r requirments.txt
 set HF_ENDPOINT=https://hf-mirror.com
 huggingface-cli download --resume-download stabilityai/stable-diffusion-3-medium-diffusers --local-dir stable-diffusion-3-medium-diffusers
 huggingface-cli download --resume-download ByteDance/Hyper-SD --local-dir Hyper-SD
-huggingface-cli download --resume-download InstantX/SD3-Controlnet-Depth --local-dir SD3-Controlnet-Depth
 ```
 
-### 3. Convert SD3 + HyperSD + Controlnet Pytorch Model to OpenVINO Model
-```python
-python sd3_controlnet.py
+### 3.Stable Diffusion 3 + HyperSD + Controlnet Canny with OpenVINO
+```bash
+huggingface-cli download --resume-download InstantX/SD3-Controlnet-Canny --local-dir SD3-Controlnet-Canny
+python sd3_controlnet.py -c SD3-Controlnet-Canny
 ```
 
-### 4. Run SD3 + HyperSD + Controlnet with OpenVINO runtime
+### 4.Stable Diffusion 3 + HyperSD + Controlnet Pose with OpenVINO
+```bash
+huggingface-cli download --resume-download InstantX/SD3-Controlnet-Pose --local-dir SD3-Controlnet-Pose
+python sd3_controlnet.py -c SD3-Controlnet-Pose
 ```
-python sd3_controlnet.py
+
+### 5.Stable Diffusion 3 + HyperSD + Controlnet Tile with OpenVINO
+```bash
+huggingface-cli download --resume-download InstantX/SD3-Controlnet-Tile --local-dir SD3-Controlnet-Tile
+python sd3_controlnet.py -c SD3-Controlnet-Tile
 ```

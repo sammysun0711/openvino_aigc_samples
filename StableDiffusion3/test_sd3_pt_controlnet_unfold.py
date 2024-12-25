@@ -1077,7 +1077,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                 print("pooled_projections.shape: ", pooled_prompt_embeds.shape)
                 print("len(control_block_samples): ", len(control_block_samples))
                 print("control_block_samples[0].shape: ", control_block_samples[0].shape)
-                #print("len(control_block_samples): ", len(control_block_samples))
                 print("self.joint_attention_kwargs: ", self.joint_attention_kwargs)
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -1141,13 +1140,18 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         return StableDiffusion3PipelineOutput(images=image)
 
 # load pipeline
-controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Depth")
+#controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Depth")
+#controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Pose")
+#controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Canny")
+controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Tile")
 pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
     "stable-diffusion-3-medium-diffusers",
     controlnet=controlnet
 )
 #pipe.to("cuda", torch.float16)
 
+# Depth
+"""
 # config
 control_image = load_image("depth.jpeg")
 prompt = "a panda cub, captured in a close-up, in forest, is perched on a tree trunk. good composition, Photography, the cub's ears, a fluffy black, are tucked behind its head, adding a touch of whimsy to its appearance. a lush tapestry of green leaves in the background. depth of field, National Geographic"
@@ -1164,3 +1168,39 @@ image = pipe(
     generator=generator
 ).images[0]
 image.save('image.jpg')
+"""
+"""
+control_image = load_image("pose.jpg")
+prompt = 'Anime style illustration of a girl wearing a suit. A moon in sky. In the background we see a big rain approaching. text "InstantX" on image'
+n_prompt = 'NSFW, nude, naked, porn, ugly'
+image = pipe(
+    prompt, 
+    negative_prompt=n_prompt, 
+    control_image=control_image, 
+    controlnet_conditioning_scale=0.5,
+).images[0]
+image.save('sd3_controlnet_pt_pose_image_28steps.jpg')
+"""
+"""
+control_image = load_image("canny.jpg")
+prompt = 'Anime style illustration of a girl wearing a suit. A moon in sky. In the background we see a big rain approaching. text "InstantX" on image'
+n_prompt = 'NSFW, nude, naked, porn, ugly'
+image = pipe(
+    prompt, 
+    negative_prompt=n_prompt, 
+    control_image=control_image, 
+    controlnet_conditioning_scale=0.5,
+).images[0]
+image.save('sd3_controlnet_pt_canny_image_28steps.jpg')
+"""
+
+control_image = load_image("tile.jpg")
+prompt = 'Anime style illustration of a girl wearing a suit. A moon in sky. In the background we see a big rain approaching. text "InstantX" on image'
+n_prompt = 'NSFW, nude, naked, porn, ugly'
+image = pipe(
+    prompt, 
+    negative_prompt=n_prompt, 
+    control_image=control_image, 
+    controlnet_conditioning_scale=0.5,
+).images[0]
+image.save('sd3_controlnet_pt_tile_image_28steps.jpg')

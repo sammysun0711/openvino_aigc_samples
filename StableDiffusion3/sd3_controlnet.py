@@ -1,13 +1,14 @@
+import argparse
+import copy
+from functools import partial
 import gc
 import inspect
-import time
-from functools import partial
 from pathlib import Path
+import time
 from typing import Callable, Dict, List, Optional, Union, Any
 
-import openvino as ov
 import torch
-import copy
+import openvino as ov
 
 from diffusers import SD3Transformer2DModel, StableDiffusion3ControlNetPipeline
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
@@ -16,9 +17,7 @@ from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.models.controlnets.controlnet_sd3 import SD3ControlNetModel
-from diffusers.pipelines.stable_diffusion_3.pipeline_output import (
-    StableDiffusion3PipelineOutput,
-)
+from diffusers.pipelines.stable_diffusion_3.pipeline_output import StableDiffusion3PipelineOutput
 from diffusers.loaders import SD3LoraLoaderMixin
 from diffusers.utils import (
     USE_PEFT_BACKEND,
@@ -39,14 +38,17 @@ from transformers import (
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
-MODEL_DIR = Path("stable-diffusion-3-ov")
+MODEL_DIR = Path("stable-diffusion-3-controlnet-ov")
 
 TEXT_ENCODER_PATH = MODEL_DIR / "text_encoder.xml"
 TEXT_ENCODER_2_PATH = MODEL_DIR / "text_encoder_2.xml"
 TEXT_ENCODER_3_PATH = MODEL_DIR / "text_encoder_3.xml"
 
 VAE_ENCODER_PATH = MODEL_DIR / "vae_encoder.xml"
-CONTROLNET_PATH = MODEL_DIR / "controlnet.xml"
+CONTROLNET_PATH_POSE = MODEL_DIR / "controlnet_pose.xml"
+CONTROLNET_PATH_TILE = MODEL_DIR / "controlnet_tile.xml"
+CONTROLNET_PATH_CANNY = MODEL_DIR / "controlnet_canny.xml"
+CONTROLNET_PATH = ""
 TRANSFORMER_PATH = MODEL_DIR / "transformer.xml"
 VAE_DECODER_PATH = MODEL_DIR / "vae_decoder.xml"
 
@@ -64,7 +66,7 @@ def get_pipeline_components(
     load_t5,
     model_id="stable-diffusion-3-medium-diffusers",
     lora_path="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors",
-    controlnet_path="SD3-Controlnet-Depth",
+    controlnet_path="SD3-Controlnet-Tile",
 ):
     pipe_kwargs = {"trust_remote_code": True}
     if not load_t5:
@@ -166,14 +168,14 @@ def convert_controlnet(controlnet):
             ov_model = ov.convert_model(controlnet, example_input=inputs)
             for i, output_tensor in enumerate(ov_model.outputs):
                 r_name = output_tensor.get_node().get_friendly_name()
-                print("============")
-                print(r_name)
+                #print("============")
+                #print(r_name)
 
                 n_name = CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i)
                 output_tensor.get_node().set_friendly_name(n_name)
                 output_tensor.set_names({n_name})
-                print(output_tensor.get_node().get_friendly_name())
-                print("============")
+                #print(output_tensor.get_node().get_friendly_name())
+                #print("============")
 
             ov_model.validate_nodes_and_infer_types()
             ov.save_model(ov_model, CONTROLNET_PATH)
@@ -340,7 +342,7 @@ def convert_sd3(
     use_hypersd,
     model_id="stable-diffusion-3-medium-diffusers",
     lora_path="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors",
-    controlnet_path="SD3-Controlnet-Depth",
+    controlnet_path="SD3-Controlnet-Tile",
 ):
     conversion_statuses = [
         TRANSFORMER_PATH.exists(),
@@ -1468,20 +1470,11 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                     "hidden_states": latent_model_input,
                     "timestep": timestep,
                     "encoder_hidden_states": prompt_embeds,
-                    "pooled_projections": pooled_prompt_embeds,
-                    "control_block_samples.1": controlnet_outputs[0],
-                    "control_block_samples.2": controlnet_outputs[1],
-                    "control_block_samples.3": controlnet_outputs[2],
-                    "control_block_samples.4": controlnet_outputs[3],
-                    "control_block_samples.5": controlnet_outputs[4],
-                    "control_block_samples.6": controlnet_outputs[5],
-                    "control_block_samples.7": controlnet_outputs[6],
-                    "control_block_samples.8": controlnet_outputs[7],
-                    "control_block_samples.9": controlnet_outputs[8],
-                    "control_block_samples.10": controlnet_outputs[9],
-                    "control_block_samples.11": controlnet_outputs[10],
-                    "control_block_samples.12": controlnet_outputs[11],
+                    "pooled_projections": pooled_prompt_embeds
                 }
+                for i in range(len(controlnet_outputs)):
+                    transformer_inputs[CONTROL_BLOCK_SAMPLE_LARER_PREFIX+str(i+1)] = controlnet_outputs[i]
+
                 noise_pred = torch.from_numpy(
                     self.transformer(transformer_inputs)[0])
                 # print("noise_pred: ", noise_pred)
@@ -1587,16 +1580,75 @@ def init_sd3_controlnet_pipeline(
 
 
 if __name__ == "__main__":
-    load_t5 = True
-    use_hypersd = True
-    device = "CPU"
-    # prompt = "A raccoon trapped inside a glass jar full of colorful candies, the background is steamy with vivid colors"
-    prompt = "a panda cub, captured in a close-up, in forest, is perched on a tree trunk. good composition, Photography, the cub's ears, a fluffy black, are tucked behind its head, adding a touch of whimsy to its appearance. a lush tapestry of green leaves in the background. depth of field, National Geographic"
-    n_prompt = (
-        "bad hands, blurry, NSFW, nude, naked, porn, ugly, bad quality, worst quality"
-    )
+    parser = argparse.ArgumentParser('Stable Diffusion 3 Controlnet with OpenVNIO', add_help=True, formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument(
+        '-m', '--model_id', help="Model folder including Stable Diffusion 3 Medium Pytorch model", type=str, default="stable-diffusion-3-medium-diffusers")
+    parser.add_argument(
+        '-l', '--lora_path', help="Model folder including HyperSD LoRA for Stable Diffusion 3 Medium Pytorch models", type=str, default="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors")
+    parser.add_argument(
+        '-c', '--controlnet_path', help="Model folder including Controlnet for Stable Diffusion 3 Medium Pytorch models", type=str, default="SD3-Controlnet-Tile")
+    parser.add_argument(
+        '-p', '--prompt', default="Anime style illustration of a girl wearing a suit. A moon in sky. In the background we see a big rain approaching. text 'InstantX' on image'", type=str, help='positve prompt')
+    parser.add_argument(
+        '-np', '--n_prompt', default="NSFW, nude, naked, porn, ugly", type=str, help='negativ_prompt')
+    parser.add_argument(
+        '-d', '--device', default='CPU', type=str, help='Inference device')
+    parser.add_argument(
+        '--load_t5', default=True, type=bool, help='Whether use T5XXL as Text Encoder 3 for image generation')
+    parser.add_argument(
+        '--use_hypersd', default=True, type=bool, help='Whether use HyperSD LoRA for image generation')
+    parser.add_argument(
+        '--guidance_scale', default=3.0, type=float, help='Classifier-Free Guidance (CFG) scale to control image generation process')
+    parser.add_argument(
+        '--seed', default=42, type=int, help='Random seed for image generation')
+    parser.add_argument(
+        '--height', default=1024, type=int, help='Specify target generated image height')
+    parser.add_argument(
+        '--width', default=1024, type=int, help='Specify target generated image width')
+    parser.add_argument(
+        '--image_path', help="Path of Input Image for Controlnet for Stable Diffusion 3 Medium Pytorch models", type=str, default="tile.jpg")
+    
+    args = parser.parse_args()
+    print("Args: ", args)
 
-    convert_sd3(load_t5=load_t5, use_hypersd=use_hypersd)
+    load_t5 = args.load_t5
+    use_hypersd = args.use_hypersd
+    device = args.device
+    model_id = args.model_id
+    lora_path = args.lora_path
+    controlnet_path = args.controlnet_path
+    controlnet_image_path = args.image_path
+    prompt = args.prompt
+    n_prompt = args.n_prompt
+    guidance_scale = args.guidance_scale
+    height = args.height
+    width = args.width
+    seed = args.seed
+    controlnet_type = None
+
+    if "Canny" in controlnet_path:
+        CONTROLNET_PATH = CONTROLNET_PATH_CANNY
+        conrolnet_image_path = "canny.jpg"
+        controlnet_type = "canny"
+    elif "Pose" in controlnet_path:
+        CONTROLNET_PATH = CONTROLNET_PATH_POSE
+        conrolnet_image_path = "pose.jpg"
+        controlnet_type = "pose"
+    elif "Tile" in controlnet_path:
+        CONTROLNET_PATH = CONTROLNET_PATH_TILE
+        conrolnet_image_path = "tile.jpg"
+        controlnet_type = "tile"
+    else:
+        print("Error! Found unsupported controlnet for SD3: ", controlnet_path)
+        exit(1)
+
+    convert_sd3(
+        load_t5=load_t5,
+        use_hypersd=use_hypersd,
+        model_id=model_id,
+        lora_path=lora_path,
+        controlnet_path=controlnet_path,
+    )
 
     models_dict = {
         "transformer": TRANSFORMER_PATH,
@@ -1615,16 +1667,10 @@ if __name__ == "__main__":
     ov_pipe = init_sd3_controlnet_pipeline(
         models_dict, device, use_hypersd=use_hypersd)
     pipeline_init_duration = time.perf_counter() - start
-    print(
-        f"Pipeline initialization end, elapsed {pipeline_init_duration:.03f} secs. ")
+    print(f"Pipeline initialization end, elapsed {pipeline_init_duration:.03f} secs. ")
 
-    control_image = load_image("depth.jpeg")
-    prompt = "a panda cub, captured in a close-up, in forest, is perched on a tree trunk. good composition, Photography, the cub's ears, a fluffy black, are tucked behind its head, adding a touch of whimsy to its appearance. a lush tapestry of green leaves in the background. depth of field, National Geographic"
-    n_prompt = ("bad hands, blurry, NSFW, nude, naked, porn, ugly, bad quality, worst quality")
-    guidance_scale = 3.0
-    height = 1024
-    width = 1024
-    seed = 4000
+    control_image = load_image(conrolnet_image_path)
+
     generator = torch.Generator(device="cpu").manual_seed(seed)
     print("Image generation start ...")
     start = time.perf_counter()
@@ -1639,6 +1685,7 @@ if __name__ == "__main__":
         height=height,
         width=width,
     ).images[0]
+
     inference_duration = time.perf_counter() - start
     print(f"Image generation finished, elapsed {inference_duration:.03f} secs. ")
-    image.save(f"sd3_controlnet_ov_guidance_scale_{guidance_scale}_{height}x{width}_seed_{seed}.jpg")
+    image.save(f"sd3_controlnet_{controlnet_type}_ov_guidance_scale_{guidance_scale}_{height}x{width}_seed_{seed}.jpg")

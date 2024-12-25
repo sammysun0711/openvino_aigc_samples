@@ -3,7 +3,7 @@ torch
 huggingface-hub
 nncf
 numpy
-optimum-intel
+optimum-intel>=1.21.0
 transformers
 tokenizers
 openvino>=2024.6
