@@ -8,3 +8,5 @@ transformers
 tokenizers
 openvino>=2024.6
 diffusers>=0.32.0
+accelerate
+peft
