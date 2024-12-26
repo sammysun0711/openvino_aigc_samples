@@ -53,6 +53,8 @@ CONTROLNET_PATH_TILE = MODEL_DIR / "controlnet_tile.xml"
 CONTROLNET_PATH_CANNY = MODEL_DIR / "controlnet_canny.xml"
 CONTROLNET_PATH = ""
 TRANSFORMER_PATH = MODEL_DIR / "transformer.xml"
+TRANSFORMER_INT8_PATH = MODEL_DIR / "transformer_int8.xml"
+
 VAE_DECODER_PATH = MODEL_DIR / "vae_decoder.xml"
 
 CONTROL_BLOCK_SAMPLE_LARER_PREFIX = "control_block_samples."
@@ -1078,13 +1080,14 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
         height,
         width,
         dtype,
-        device,
+        # device,
         generator,
         latents=None,
     ):
+        """
         if latents is not None:
             return latents.to(device=device, dtype=dtype)
-
+        """
         shape = (
             batch_size,
             num_channels_latents,
@@ -1408,7 +1411,7 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
             height,
             width,
             prompt_embeds.dtype,
-            device,
+            # device,
             generator,
             latents,
         )
@@ -1433,7 +1436,7 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-
+                start = time.perf_counter()
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (
                     torch.cat([latents] * 2)
@@ -1452,10 +1455,20 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                     "timestep": timestep,
                 }
                 # print("controlnet_inputs: ", controlnet_inputs)
+                prepare_controlnet_input_dur = time.perf_counter() - start
+                print(
+                    f"Prepare controlnet input duration, elapsed {prepare_controlnet_input_dur:.03f} secs. "
+                )
 
+                start = time.perf_counter()
                 controlnet_outputs = self.controlnet(controlnet_inputs)
                 # print("controlnet_outputs: ", controlnet_outputs)
+                controlnet_inference_duration = time.perf_counter() - start
+                print(
+                    f"Controlnet inference duration, elapsed {controlnet_inference_duration:.03f} secs. "
+                )
 
+                start = time.perf_counter()
                 # print("self.transformer.inputs:", self.transformer.inputs)
                 transformer_inputs = {
                     "hidden_states": latent_model_input,
@@ -1468,7 +1481,19 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                         CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i + 1)
                     ] = controlnet_outputs[i]
 
+                prepare_transformer_input_dur = time.perf_counter() - start
+                print(
+                    f"Prepare transformer input duration, elapsed {prepare_transformer_input_dur:.03f} secs. "
+                )
+
+                start = time.perf_counter()
                 noise_pred = torch.from_numpy(self.transformer(transformer_inputs)[0])
+                transformer_inference_duration = time.perf_counter() - start
+
+                print(
+                    f"Transformer inference duration, elapsed {transformer_inference_duration:.03f} secs. "
+                )
+
                 # print("noise_pred: ", noise_pred)
 
                 # perform guidance
@@ -1563,6 +1588,7 @@ def init_sd3_controlnet_pipeline(
     pipeline_args["tokenizer_3"] = tokenizer_3
     pipeline_args["text_encoder_3_dim"] = text_encoder_3_dim
     ov_pipe = OVStableDiffusion3ControlNetPipeline(**pipeline_args)
+
     return ov_pipe
 
 
@@ -1636,6 +1662,12 @@ if __name__ == "__main__":
         type=bool,
         help="Whether use INT4 weight compressed T5XXL",
     )
+    parser.add_argument(
+        "--use_transformer_int8",
+        default=True,
+        type=bool,
+        help="Whether use INT8 quantized transformer model",
+    )
     args = parser.parse_args()
     print("Args: ", args)
 
@@ -1650,6 +1682,7 @@ if __name__ == "__main__":
     width = args.width
     seed = args.seed
     controlnet_type = args.controlnet_type
+    use_transformer_int8 = args.use_transformer_int8
 
     if "canny" in controlnet_type.lower():
         CONTROLNET_PATH = CONTROLNET_PATH_CANNY
@@ -1662,7 +1695,7 @@ if __name__ == "__main__":
         exit(1)
 
     models_dict = {
-        "transformer": TRANSFORMER_PATH,
+        #    "transformer": TRANSFORMER_PATH,
         "controlnet": CONTROLNET_PATH,
         "vae_encoder": VAE_ENCODER_PATH,
         "vae_decoder": VAE_DECODER_PATH,
@@ -1675,6 +1708,11 @@ if __name__ == "__main__":
 
     if load_t5 and use_t5_int4:
         models_dict["text_encoder_3"] = TEXT_ENCODER_3_INT4_PATH
+
+    if use_transformer_int8:
+        models_dict["transformer"] = TRANSFORMER_INT8_PATH
+    else:
+        models_dict["transformer"] = TRANSFORMER_PATH
 
     print("Pipeline initialization start ...")
     start = time.perf_counter()

@@ -4,14 +4,17 @@ from functools import partial
 import gc
 import inspect
 import os
+import numpy as np
 from pathlib import Path
-import time
 from typing import Callable, Dict, List, Optional, Union, Any
+from tqdm import tqdm
 
 import torch
 import openvino as ov
 import nncf
 
+import datasets
+from diffusers import StableDiffusion3ControlNetPipeline
 from diffusers import SD3Transformer2DModel, StableDiffusion3ControlNetPipeline
 from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
 from diffusers.models.autoencoders import AutoencoderKL
@@ -55,9 +58,13 @@ CONTROLNET_PATH_TILE = MODEL_DIR / "controlnet_tile.xml"
 CONTROLNET_PATH_CANNY = MODEL_DIR / "controlnet_canny.xml"
 CONTROLNET_PATH = ""
 TRANSFORMER_PATH = MODEL_DIR / "transformer.xml"
+TRANSFORMER_INT8_PATH = MODEL_DIR / "transformer_int8.xml"
+
 VAE_DECODER_PATH = MODEL_DIR / "vae_decoder.xml"
 
 CONTROL_BLOCK_SAMPLE_LARER_PREFIX = "control_block_samples."
+
+core = ov.Core()
 
 dtype_mapping = {
     torch.float32: ov.Type.f32,
@@ -65,6 +72,17 @@ dtype_mapping = {
     torch.int32: ov.Type.i32,
     torch.int64: ov.Type.i64,
 }
+
+negative_prompts = [
+    "blurry unreal occluded",
+    "low contrast disfigured uncentered mangled",
+    "amateur out of frame low quality nsfw",
+    "ugly underexposed jpeg artifacts",
+    "low saturation disturbing content",
+    "overexposed severe distortion",
+    "amateur NSFW",
+    "ugly mutilated out of frame disfigured",
+]
 
 
 def get_pipeline_components(
@@ -78,7 +96,6 @@ def get_pipeline_components(
     if not load_t5:
         pipe_kwargs.update({"text_encoder_3": None, "tokenizer_3": None})
 
-    # pipe = StableDiffusion3Pipeline.from_pretrained(model_id, **pipe_kwargs)
     controlnet = SD3ControlNetModel.from_pretrained(
         controlnet_path, trust_remote_code=True
     )
@@ -149,6 +166,77 @@ def cleanup_torchscript_cache():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
     torch.jit._state._clear_class_state()
+
+
+def disable_progress_bar(pipeline, disable=True):
+    if not hasattr(pipeline, "_progress_bar_config"):
+        pipeline._progress_bar_config = {"disable": disable}
+    else:
+        pipeline._progress_bar_config["disable"] = disable
+
+
+class CompiledModelDecorator(ov.CompiledModel):
+    def __init__(
+        self,
+        compiled_model: ov.CompiledModel,
+        data_cache: List[Any] = None,
+        keep_prob: float = 0.5,
+    ):
+        super().__init__(compiled_model)
+        self.data_cache = data_cache if data_cache is not None else []
+        self.keep_prob = keep_prob
+
+    def __call__(self, *args, **kwargs):
+        if np.random.rand() <= self.keep_prob:
+            self.data_cache.append(*args)
+        return super().__call__(*args, **kwargs)
+
+
+def collect_calibration_data(
+    ov_pipe,
+    control_image,
+    calibration_dataset_size: int,
+    num_inference_steps: int,
+    guidance_scale,
+) -> List[Dict]:
+    original_model = ov_pipe.transformer
+    calibration_data = []
+    ov_pipe.transformer = CompiledModelDecorator(
+        original_model, calibration_data, keep_prob=1
+    )
+    disable_progress_bar(ov_pipe)
+
+    dataset = datasets.load_dataset(
+        "google-research-datasets/conceptual_captions",
+        split="train",
+        trust_remote_code=True,
+        streaming=True,
+    )
+    size = int(calibration_dataset_size // num_inference_steps)
+    dataset = dataset.shuffle(seed=42).take(size)
+
+    # Run inference for data collection
+    pbar = tqdm(total=calibration_dataset_size)
+    for batch in dataset:
+        prompt = batch["caption"]
+        negative_prompt = np.random.choice(negative_prompts)
+        ov_pipe(
+            prompt,
+            negative_prompt=negative_prompt,
+            control_image=control_image,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            height=512,
+            width=512,
+        )
+        if len(calibration_data) >= calibration_dataset_size:
+            pbar.update(calibration_dataset_size - pbar.n)
+            break
+        pbar.update(len(calibration_data) - pbar.n)
+
+    disable_progress_bar(ov_pipe, disable=False)
+    ov_pipe.transformer = original_model
+    return calibration_data
 
 
 inputs = {
@@ -475,6 +563,41 @@ def convert_sd3(
 
     else:
         print("Found converted transformer model")
+
+
+def quantize_transformer(ov_pipe, control_image):
+    if not TRANSFORMER_INT8_PATH.exists():
+        calibration_dataset_size = 200
+        print("Calibration data collection started")
+        unet_calibration_data = collect_calibration_data(
+            ov_pipe,
+            control_image=control_image,
+            calibration_dataset_size=calibration_dataset_size,
+            num_inference_steps=28 if not use_hypersd else 4,
+            guidance_scale=3.0 if not use_hypersd else 0,
+        )
+        print("Calibration data collection finished")
+
+        del ov_pipe
+        gc.collect()
+        ov_pipe = None
+
+        transformer = core.read_model(TRANSFORMER_PATH)
+        # Quantization of the first Convolution layer impacts the generation results. We recommend using IgnoredScope to keep accuracy sensitive layers in FP16 precision.
+        quantized_model = nncf.quantize(
+            model=transformer,
+            calibration_dataset=nncf.Dataset(unet_calibration_data),
+            subset_size=calibration_dataset_size,
+            model_type=nncf.ModelType.TRANSFORMER,
+            # ignored_scope=nncf.IgnoredScope(names=["__module.model.base_model.model.pos_embed.proj.base_layer/aten::_convolution/Convolution"]),
+            ignored_scope=nncf.IgnoredScope(
+                names=[
+                    "__module.model.pos_embed.proj.base_layer/aten::_convolution/Convolution"
+                ]
+            ),
+        )
+
+        ov.save_model(quantized_model, TRANSFORMER_INT8_PATH)
 
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.retrieve_timesteps
@@ -1118,14 +1241,15 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
         num_channels_latents,
         height,
         width,
-        dtype,
-        device,
+        # dtype,
+        # device,
         generator,
         latents=None,
     ):
+        """
         if latents is not None:
             return latents.to(device=device, dtype=dtype)
-
+        """
         shape = (
             batch_size,
             num_channels_latents,
@@ -1449,7 +1573,7 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
             height,
             width,
             prompt_embeds.dtype,
-            device,
+            # device,
             generator,
             latents,
         )
@@ -1581,7 +1705,6 @@ def init_sd3_controlnet_pipeline(
         ov_config["ACTIVATIONS_SCALE_FACTOR"] = "10"
 
     print("Models compilation")
-    core = ov.Core()
     for model_name, model_path in models_dict.items():
         pipeline_args[model_name] = core.compile_model(
             model_path, device, ov_config if "text_encoder" in model_name else {}
@@ -1604,6 +1727,7 @@ def init_sd3_controlnet_pipeline(
     pipeline_args["tokenizer_3"] = tokenizer_3
     pipeline_args["text_encoder_3_dim"] = text_encoder_3_dim
     ov_pipe = OVStableDiffusion3ControlNetPipeline(**pipeline_args)
+
     return ov_pipe
 
 
@@ -1652,26 +1776,36 @@ if __name__ == "__main__":
         type=bool,
         help="Whether apply NNCF INT4 weight compression for T5XXL",
     )
+    parser.add_argument(
+        "--use_transformer_int8",
+        default=True,
+        type=bool,
+        help="Whether use INT8 quantized transformer model",
+    )
 
     args = parser.parse_args()
     print("Args: ", args)
 
     load_t5 = args.load_t5
     use_t5_int4 = args.use_t5_int4
+    use_transformer_int8 = args.use_transformer_int8
     use_hypersd = args.use_hypersd
     model_id = args.model_id
     lora_path = args.lora_path
     controlnet_dir = args.controlnet_dir
-
+    control_image_path = None
     for subdir in os.listdir(controlnet_dir):
         controlnet_path = Path(controlnet_dir) / subdir
         print("controlnet_path: ", controlnet_path)
         if "canny" in str(controlnet_path).lower():
             CONTROLNET_PATH = CONTROLNET_PATH_CANNY
+            control_image_path = "assets/canny.jpg"
         elif "pose" in str(controlnet_path).lower():
             CONTROLNET_PATH = CONTROLNET_PATH_POSE
+            control_image_path = "assets/pose.jpg"
         elif "tile" in str(controlnet_path).lower():
             CONTROLNET_PATH = CONTROLNET_PATH_TILE
+            control_image_path = "assets/tile.jpg"
         else:
             print("Error! Found unsupported controlnet for SD3: ", controlnet_path)
             exit(1)
@@ -1684,4 +1818,28 @@ if __name__ == "__main__":
             lora_path=lora_path,
             controlnet_path=controlnet_path,
         )
+
+    if use_transformer_int8:
+        print("Apply INT8 Quantization for Tranformers ...")
+        models_dict = {
+            "transformer": TRANSFORMER_PATH,
+            "controlnet": CONTROLNET_PATH,
+            "vae_encoder": VAE_ENCODER_PATH,
+            "vae_decoder": VAE_DECODER_PATH,
+            "text_encoder": TEXT_ENCODER_PATH,
+            "text_encoder_2": TEXT_ENCODER_2_PATH,
+        }
+
+        if load_t5 and not use_t5_int4:
+            models_dict["text_encoder_3"] = TEXT_ENCODER_3_PATH
+
+        if load_t5 and use_t5_int4:
+            models_dict["text_encoder_3"] = TEXT_ENCODER_3_INT4_PATH
+
+        ov_pipe = init_sd3_controlnet_pipeline(
+            models_dict, "CPU", use_hypersd=use_hypersd
+        )
+        control_image = load_image(control_image_path)
+        quantize_transformer(ov_pipe, control_image)
+
     print("OpenVINO model conversion finished, saved models in path: ", MODEL_DIR)
