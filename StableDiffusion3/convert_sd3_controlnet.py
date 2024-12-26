@@ -1,71 +1,480 @@
-import torch
-#from diffusers import StableDiffusion3ControlNetPipeline
-#from diffusers.models import SD3ControlNetModel, SD3MultiControlNetModel
-from diffusers.utils import load_image
+import argparse
+import copy
+from functools import partial
+import gc
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import os
+from pathlib import Path
+import time
+from typing import Callable, Dict, List, Optional, Union, Any
 
 import torch
+import openvino as ov
+import nncf
+
+from diffusers import SD3Transformer2DModel, StableDiffusion3ControlNetPipeline
+from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
+from diffusers.models.autoencoders import AutoencoderKL
+from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils.torch_utils import randn_tensor
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.models.controlnets.controlnet_sd3 import SD3ControlNetModel
+from diffusers.pipelines.stable_diffusion_3.pipeline_output import (
+    StableDiffusion3PipelineOutput,
+)
+from diffusers.loaders import SD3LoraLoaderMixin
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+    load_image,
+)
+
 from transformers import (
     CLIPTextModelWithProjection,
     CLIPTokenizer,
     T5EncoderModel,
     T5TokenizerFast,
+    AutoTokenizer,
 )
-
-from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
-from diffusers.loaders import FromSingleFileMixin, SD3LoraLoaderMixin
-from diffusers.models.autoencoders import AutoencoderKL
-from diffusers.models.controlnets.controlnet_sd3 import SD3ControlNetModel, SD3MultiControlNetModel
-from diffusers.models.transformers import SD3Transformer2DModel
-from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
-from diffusers.utils import (
-    USE_PEFT_BACKEND,
-    is_torch_xla_available,
-    logging,
-    replace_example_docstring,
-    scale_lora_layers,
-    unscale_lora_layers,
-)
-from diffusers.utils.torch_utils import randn_tensor
-from diffusers.pipelines.pipeline_utils import DiffusionPipeline
-from diffusers.pipelines.stable_diffusion_3.pipeline_output import StableDiffusion3PipelineOutput
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-EXAMPLE_DOC_STRING = """
-    Examples:
-        ```py
-        >>> import torch
-        >>> from diffusers import StableDiffusion3ControlNetPipeline
-        >>> from diffusers.models import SD3ControlNetModel, SD3MultiControlNetModel
-        >>> from diffusers.utils import load_image
 
-        >>> controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Canny", torch_dtype=torch.float16)
+MODEL_DIR = Path("stable-diffusion-3-controlnet-ov")
 
-        >>> pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-        ...     "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
-        ... )
-        >>> pipe.to("cuda")
-        >>> control_image = load_image(
-        ...     "https://huggingface.co/datasets/hf-internal-testing/diffusers-images/resolve/main/sd_controlnet/bird_canny.png"
-        ... )
-        >>> prompt = "A bird in space"
-        >>> image = pipe(
-        ...     prompt, control_image=control_image, height=1024, width=768, controlnet_conditioning_scale=0.7
-        ... ).images[0]
-        >>> image.save("sd3.png")
-        ```
-"""
+TEXT_ENCODER_PATH = MODEL_DIR / "text_encoder.xml"
+TEXT_ENCODER_2_PATH = MODEL_DIR / "text_encoder_2.xml"
+TEXT_ENCODER_3_PATH = MODEL_DIR / "text_encoder_3.xml"
+TEXT_ENCODER_3_INT4_PATH = MODEL_DIR / "text_encoder_3_int4.xml"
+
+VAE_ENCODER_PATH = MODEL_DIR / "vae_encoder.xml"
+CONTROLNET_PATH_POSE = MODEL_DIR / "controlnet_pose.xml"
+CONTROLNET_PATH_TILE = MODEL_DIR / "controlnet_tile.xml"
+CONTROLNET_PATH_CANNY = MODEL_DIR / "controlnet_canny.xml"
+CONTROLNET_PATH = ""
+TRANSFORMER_PATH = MODEL_DIR / "transformer.xml"
+VAE_DECODER_PATH = MODEL_DIR / "vae_decoder.xml"
+
+CONTROL_BLOCK_SAMPLE_LARER_PREFIX = "control_block_samples."
+
+dtype_mapping = {
+    torch.float32: ov.Type.f32,
+    torch.float64: ov.Type.f64,
+    torch.int32: ov.Type.i32,
+    torch.int64: ov.Type.i64,
+}
+
+
+def get_pipeline_components(
+    use_hypersd,
+    load_t5,
+    model_id="stable-diffusion-3-medium-diffusers",
+    lora_path="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors",
+    controlnet_path="InstantX/SD3-Controlnet-Tile",
+):
+    pipe_kwargs = {"trust_remote_code": True}
+    if not load_t5:
+        pipe_kwargs.update({"text_encoder_3": None, "tokenizer_3": None})
+
+    # pipe = StableDiffusion3Pipeline.from_pretrained(model_id, **pipe_kwargs)
+    controlnet = SD3ControlNetModel.from_pretrained(
+        controlnet_path, trust_remote_code=True
+    )
+    pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
+        model_id, controlnet=controlnet, **pipe_kwargs
+    )
+
+    if use_hypersd:
+        pipe.load_lora_weights(lora_path, trust_remote_code=True)
+        pipe.fuse_lora(lora_scale=0.125)
+        scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
+            Path(model_id) / "scheduler", trust_remote_code=True
+        )
+        pipe.scheduler = scheduler
+
+    pipe.tokenizer.save_pretrained(MODEL_DIR / "tokenizer")
+    pipe.tokenizer_2.save_pretrained(MODEL_DIR / "tokenizer_2")
+    if load_t5:
+        pipe.tokenizer_3.save_pretrained(MODEL_DIR / "tokenizer_3")
+    pipe.scheduler.save_pretrained(MODEL_DIR / "scheduler")
+    transformer, vae, text_encoder, text_encoder_2, text_encoder_3, controlnet = (
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+    if not TEXT_ENCODER_PATH.exists():
+        text_encoder = pipe.text_encoder
+        text_encoder.eval()
+
+    if not TEXT_ENCODER_2_PATH.exists():
+        text_encoder_2 = pipe.text_encoder_2
+        text_encoder_2.eval()
+
+    if not TEXT_ENCODER_3_PATH.exists() and load_t5 and not use_t5_int4:
+        text_encoder_3 = pipe.text_encoder_3
+        text_encoder_3.eval()
+
+    if not TEXT_ENCODER_3_INT4_PATH.exists() and load_t5 and use_t5_int4:
+        text_encoder_3 = pipe.text_encoder_3
+        text_encoder_3.eval()
+
+    if not VAE_ENCODER_PATH.exists():
+        vae = pipe.vae
+        vae.eval()
+
+    if not CONTROLNET_PATH.exists():
+        controlnet = pipe.controlnet
+        controlnet.eval()
+    if not TRANSFORMER_PATH.exists():
+        transformer = pipe.transformer
+        transformer.eval()
+
+    if not VAE_DECODER_PATH.exists():
+        vae = pipe.vae
+        vae.eval()
+
+    return transformer, vae, text_encoder, text_encoder_2, text_encoder_3, controlnet
+
+
+def cleanup_torchscript_cache():
+    """
+    Helper for removing cached model representation
+    """
+    torch._C._jit_clear_class_registry()
+    torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+    torch.jit._state._clear_class_state()
+
+
+inputs = {
+    "hidden_states": torch.randn((2, 16, 128, 128), dtype=torch.float32),
+    "encoder_hidden_states": torch.randn((2, 333, 4096), dtype=torch.float32),
+    "pooled_projections": torch.randn((2, 2048), dtype=torch.float32),
+    "timestep": torch.ones(1, dtype=torch.int64),
+    "controlnet_cond": torch.randn((2, 16, 128, 128), dtype=torch.float32),
+    # "conditioning_scale": 0.5
+}
+
+control_block_samples = None
+conditioning_scale = 0.5
+
+
+def convert_controlnet(controlnet):
+    print("Convert controlnet start...")
+    inputs.pop("control_block_samples", None)
+    if not CONTROLNET_PATH.exists():
+        with torch.no_grad():
+            controlnet.forward = partial(
+                controlnet.forward,
+                conditioning_scale=conditioning_scale,
+                joint_attention_kwargs=None,
+                return_dict=False,
+            )
+            global control_block_samples
+            control_block_samples = controlnet(**inputs)
+            # ov_model = ov.convert_model(controlnet, example_input=inputs, input=input_info)
+            ov_model = ov.convert_model(controlnet, example_input=inputs)
+            for i, output_tensor in enumerate(ov_model.outputs):
+                r_name = output_tensor.get_node().get_friendly_name()
+                # print("============")
+                # print(r_name)
+
+                n_name = CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i)
+                output_tensor.get_node().set_friendly_name(n_name)
+                output_tensor.set_names({n_name})
+                # print(output_tensor.get_node().get_friendly_name())
+                # print("============")
+
+            ov_model.validate_nodes_and_infer_types()
+            ov.save_model(ov_model, CONTROLNET_PATH)
+            del ov_model
+            cleanup_torchscript_cache()
+        print("ControlNet successfully converted to IR")
+        del controlnet
+    else:
+        print(f"ControlNet will be loaded from {CONTROLNET_PATH}")
+
+
+def flattenize_inputs(inputs):
+    flatten_inputs = []
+    for input_data in inputs:
+        if input_data is None:
+            continue
+        if isinstance(input_data, (list, tuple)):
+            flatten_inputs.extend(flattenize_inputs(input_data))
+        else:
+            flatten_inputs.append(input_data)
+    return flatten_inputs
+
+
+def convert_sd3_transformer(transformer):
+    class TransformerWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+
+        def forward(
+            self,
+            hidden_states,
+            encoder_hidden_states,
+            pooled_projections,
+            timestep,
+            control_block_samples,
+            joint_attention_kwargs=None,
+            return_dict=False,
+            skip_layers=None,
+        ):
+            block_controlnet_hidden_states = [
+                res.to(torch.float32) for res in control_block_samples
+            ]
+            return self.model(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                pooled_projections=pooled_projections,
+                timestep=timestep,
+                block_controlnet_hidden_states=block_controlnet_hidden_states,
+            )
+
+    inputs.pop("controlnet_cond", None)
+    inputs["control_block_samples"] = control_block_samples[0]
+    transformer = TransformerWrapper(transformer)
+    transformer.forward = partial(
+        transformer.forward,
+        joint_attention_kwargs=None,
+        return_dict=False,
+        skip_layers=None,
+    )
+
+    with torch.no_grad():
+        ov_model = ov.convert_model(
+            transformer,
+            example_input=inputs,
+        )
+    flatten_inputs = flattenize_inputs(inputs.values())
+    i = 1
+    for input_data, input_tensor in zip(flatten_inputs, ov_model.inputs):
+
+        r_name = input_tensor.get_node().get_friendly_name()
+        r_shape = ov.PartialShape(input_data.shape)
+        # print("============")
+        # print(r_name, r_shape)
+        r_shape[0] = -1
+        if len(r_shape) == 4:
+            r_shape[2] = -1
+            r_shape[3] = -1
+        elif len(r_shape) == 3:
+            r_shape[1] = -1
+        elif len(r_shape) == 2:
+            r_shape[1] = -1
+        if (
+            r_name
+            not in [
+                "hidden_states",
+                "encoder_hidden_states",
+                "pooled_projections",
+                "timestep",
+            ]
+            and len(r_shape) == 3
+        ):
+            n_name = CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i)
+            input_tensor.get_node().set_friendly_name(n_name)
+            input_tensor.set_names({n_name})
+            i += 1
+        # print(input_tensor.get_node().get_friendly_name(), r_shape)
+        # print("============")
+        input_tensor.get_node().set_partial_shape(r_shape)
+        input_tensor.get_node().set_element_type(dtype_mapping[input_data.dtype])
+
+    ov_model.validate_nodes_and_infer_types()
+    ov.save_model(ov_model, TRANSFORMER_PATH)
+    del ov_model
+    cleanup_torchscript_cache()
+
+
+def compress_model(model, save_path, group_size=128, ratio=1.0):
+    if not save_path.exists():
+        print(f"Model compression started")
+        print(
+            f"Compression parameters:\n\tmode = {nncf.CompressWeightsMode.INT4_SYM}\n\tratio = {ratio}\n\tgroup_size = {group_size}"
+        )
+        compressed_model = nncf.compress_weights(
+            model,
+            mode=nncf.CompressWeightsMode.INT4_SYM,
+            ratio=ratio,
+            group_size=group_size,
+        )
+        print(f"model compression finished")
+        ov.save_model(compressed_model, save_path)
+        del compressed_model
+
+
+def convert_t5_model(text_encoder, use_t5_int4):
+    with torch.no_grad():
+        ov_model = ov.convert_model(
+            text_encoder, example_input=torch.ones([1, 77], dtype=torch.long)
+        )
+    if use_t5_int4 and not TEXT_ENCODER_3_INT4_PATH.exists():
+        compress_model(ov_model, TEXT_ENCODER_3_INT4_PATH)
+    else:
+        ov.save_model(ov_model, TEXT_ENCODER_3_PATH)
+    del ov_model
+    cleanup_torchscript_cache()
+
+
+def convert_clip_model(text_encoder, text_encoder_path):
+    text_encoder.forward = partial(
+        text_encoder.forward, output_hidden_states=True, return_dict=False
+    )
+    with torch.no_grad():
+        ov_model = ov.convert_model(
+            text_encoder, example_input=torch.ones([1, 77], dtype=torch.long)
+        )
+    ov.save_model(ov_model, text_encoder_path)
+    del ov_model
+    cleanup_torchscript_cache()
+
+
+def convert_vae_encoder(vae):
+    vae_encoder = copy.deepcopy(vae)
+    with torch.no_grad():
+        vae_encoder.forward = lambda sample: {
+            "latent_sample": vae_encoder.encode(x=sample)["latent_dist"].sample()
+        }
+        # vae.forward = vae.encode
+        ov_model = ov.convert_model(
+            vae_encoder,
+            example_input=torch.ones([2, 3, 512, 512]),
+            input=[-1, 3, -1, -1],
+        )
+    ov.save_model(ov_model, VAE_ENCODER_PATH)
+    del ov_model
+    del vae_encoder
+    cleanup_torchscript_cache()
+
+
+def convert_vae_decoder(vae):
+    vae_decoder = copy.deepcopy(vae)
+    with torch.no_grad():
+        vae_decoder.forward = vae_decoder.decode
+        ov_model = ov.convert_model(
+            vae_decoder, example_input=torch.ones([1, 16, 64, 64])
+        )
+    ov.save_model(ov_model, VAE_DECODER_PATH)
+    del ov_model
+    del vae_decoder
+    cleanup_torchscript_cache()
+
+
+def convert_sd3(
+    load_t5=True,
+    use_t5_int4=True,
+    use_hypersd=True,
+    model_id="stable-diffusion-3-medium-diffusers",
+    lora_path="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors",
+    controlnet_path="InstantX/SD3-Controlnet-Tile",
+):
+    conversion_statuses = [
+        TRANSFORMER_PATH.exists(),
+        CONTROLNET_PATH.exists(),
+        VAE_ENCODER_PATH.exists(),
+        VAE_DECODER_PATH.exists(),
+        TEXT_ENCODER_PATH.exists(),
+        TEXT_ENCODER_2_PATH.exists(),
+    ]
+
+    if load_t5 and not use_t5_int4:
+        conversion_statuses.append(TEXT_ENCODER_3_PATH.exists())
+
+    if load_t5 and use_t5_int4:
+        conversion_statuses.append(TEXT_ENCODER_3_INT4_PATH.exists())
+
+    requires_conversion = not all(conversion_statuses)
+
+    transformer, vae, text_encoder, text_encoder_2, text_encoder_3, controlnet = (
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+    if requires_conversion:
+        transformer, vae, text_encoder, text_encoder_2, text_encoder_3, controlnet = (
+            get_pipeline_components(
+                use_hypersd, load_t5, model_id, lora_path, controlnet_path
+            )
+        )
+    else:
+        print("SD3 model already converted")
+        return
+
+    if load_t5 and not use_t5_int4 and not TEXT_ENCODER_3_PATH.exists():
+        print("T5 encoder model conversion started")
+        convert_t5_model(text_encoder_3, use_t5_int4)
+        del text_encoder_3
+        gc.collect()
+        print("T5 encoder conversion finished")
+    elif load_t5 and use_t5_int4 and not TEXT_ENCODER_3_INT4_PATH.exists():
+        print("T5 encoder INT4 model conversion started")
+        convert_t5_model(text_encoder_3, use_t5_int4)
+        del text_encoder_3
+        gc.collect()
+        print("T5 encoder INT4 conversion finished")
+    elif load_t5:
+        print("Found converted T5 encoder model")
+
+    if not TEXT_ENCODER_PATH.exists():
+        print("Clip Text encoder 1 conversion started")
+        convert_clip_model(text_encoder, TEXT_ENCODER_PATH)
+        del text_encoder
+        gc.collect()
+        print("Clip Text encoder 1 conversion finished")
+    else:
+        print("Found converted Clip Text encoder 1")
+
+    if not TEXT_ENCODER_2_PATH.exists():
+        print("Clip Text encoder 2 conversion started")
+        convert_clip_model(text_encoder_2, TEXT_ENCODER_2_PATH)
+        del text_encoder_2
+        gc.collect()
+        print("Clip Text encoder 2 conversion finished")
+    else:
+        print("Found converted Clip Text encoder 2")
+
+    if not VAE_ENCODER_PATH.exists():
+        print("VAE encoder conversion started")
+        convert_vae_encoder(vae)
+        # del vae
+        gc.collect()
+
+    if not VAE_DECODER_PATH.exists():
+        print("VAE decoder conversion started")
+        convert_vae_decoder(vae)
+        # del vae
+        gc.collect()
+
+    if not CONTROLNET_PATH.exists():
+        print("Controlnet conversion started")
+        inputs.pop()
+        convert_controlnet(controlnet)
+        del controlnet
+        gc.collect()
+
+    if not TRANSFORMER_PATH.exists():
+        print("Transformer model conversion started")
+        convert_sd3_transformer(transformer)
+        del transformer
+        gc.collect()
+        print("Transformer model conversion finished")
+
+    else:
+        print("Found converted transformer model")
 
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.retrieve_timesteps
@@ -77,7 +486,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -101,9 +510,13 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+        raise ValueError(
+            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+        )
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accepts_timesteps = "timesteps" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -113,7 +526,9 @@ def retrieve_timesteps(
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accept_sigmas = "sigmas" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -128,7 +543,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, FromSingleFileMixin):
+class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
     r"""
     Args:
         transformer ([`SD3Transformer2DModel`]):
@@ -166,26 +581,36 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             additional conditioning.
     """
 
-    model_cpu_offload_seq = "text_encoder->text_encoder_2->text_encoder_3->transformer->vae"
+    model_cpu_offload_seq = (
+        "text_encoder->text_encoder_2->text_encoder_3->transformer->vae"
+    )
     _optional_components = []
-    _callback_tensor_inputs = ["latents", "prompt_embeds", "negative_prompt_embeds", "negative_pooled_prompt_embeds"]
+    _callback_tensor_inputs = [
+        "latents",
+        "prompt_embeds",
+        "negative_prompt_embeds",
+        "negative_pooled_prompt_embeds",
+    ]
 
     def __init__(
         self,
         transformer: SD3Transformer2DModel,
         scheduler: FlowMatchEulerDiscreteScheduler,
-        vae: AutoencoderKL,
+        vae_encoder: AutoencoderKL,
+        vae_decoder: AutoencoderKL,
         text_encoder: CLIPTextModelWithProjection,
         tokenizer: CLIPTokenizer,
         text_encoder_2: CLIPTextModelWithProjection,
         tokenizer_2: CLIPTokenizer,
         text_encoder_3: T5EncoderModel,
         tokenizer_3: T5TokenizerFast,
-        controlnet: Union[
-            SD3ControlNetModel, List[SD3ControlNetModel], Tuple[SD3ControlNetModel], SD3MultiControlNetModel
-        ],
+        controlnet: SD3ControlNetModel,
+        text_encoder_3_dim=4096,
+        joint_attention_dim=4096,
+        force_zeros_for_pooled_projection=True,
     ):
         super().__init__()
+        """
         if isinstance(controlnet, (list, tuple)):
             controlnet = SD3MultiControlNetModel(controlnet)
         if isinstance(controlnet, SD3MultiControlNetModel):
@@ -201,9 +626,11 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             if hasattr(controlnet.config, "use_pos_embed") and controlnet.config.use_pos_embed is False:
                 pos_embed = controlnet._get_pos_embed_from_transformer(transformer)
                 controlnet.pos_embed = pos_embed.to(controlnet.dtype).to(controlnet.device)
+        """
 
         self.register_modules(
-            vae=vae,
+            vae_encoder=vae_encoder,
+            vae_decoder=vae_decoder,
             text_encoder=text_encoder,
             text_encoder_2=text_encoder_2,
             text_encoder_3=text_encoder_3,
@@ -214,6 +641,7 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             scheduler=scheduler,
             controlnet=controlnet,
         )
+        """
         self.vae_scale_factor = (
             2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
         )
@@ -226,6 +654,20 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             if hasattr(self, "transformer") and self.transformer is not None
             else 128
         )
+        """
+        self.vae_scale_factor = 2**3
+        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
+        self.tokenizer_max_length = (
+            self.tokenizer.model_max_length
+            if hasattr(self, "tokenizer") and self.tokenizer is not None
+            else 77
+        )
+        self.vae_scaling_factor = 1.5305
+        self.vae_shift_factor = 0.0609
+        self.default_sample_size = 64
+        self._text_encoder_3_dim = text_encoder_3_dim
+        self._joint_attention_dim = joint_attention_dim
+        self._force_zeros_for_pooled_projection = force_zeros_for_pooled_projection
 
     # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline._get_t5_prompt_embeds
     def _get_t5_prompt_embeds(
@@ -233,12 +675,7 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         prompt: Union[str, List[str]] = None,
         num_images_per_prompt: int = 1,
         max_sequence_length: int = 256,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
     ):
-        device = device or self._execution_device
-        dtype = dtype or self.text_encoder.dtype
-
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
 
@@ -247,10 +684,8 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                 (
                     batch_size * num_images_per_prompt,
                     self.tokenizer_max_length,
-                    self.transformer.config.joint_attention_dim,
+                    self.joint_attention_dim,
                 ),
-                device=device,
-                dtype=dtype,
             )
 
         text_inputs = self.tokenizer_3(
@@ -262,25 +697,29 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             return_tensors="pt",
         )
         text_input_ids = text_inputs.input_ids
-        untruncated_ids = self.tokenizer_3(prompt, padding="longest", return_tensors="pt").input_ids
+        untruncated_ids = self.tokenizer_3(
+            prompt, padding="longest", return_tensors="pt"
+        ).input_ids
 
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = self.tokenizer_3.batch_decode(untruncated_ids[:, self.tokenizer_max_length - 1 : -1])
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
+            text_input_ids, untruncated_ids
+        ):
+            removed_text = self.tokenizer_3.batch_decode(
+                untruncated_ids[:, self.tokenizer_max_length - 1 : -1]
+            )
             logger.warning(
                 "The following part of your input was truncated because `max_sequence_length` is set to "
                 f" {max_sequence_length} tokens: {removed_text}"
             )
 
-        prompt_embeds = self.text_encoder_3(text_input_ids.to(device))[0]
-
-        dtype = self.text_encoder_3.dtype
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-
+        prompt_embeds = torch.from_numpy(self.text_encoder_3(text_input_ids)[0])
         _, seq_len, _ = prompt_embeds.shape
 
         # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_images_per_prompt, seq_len, -1
+        )
 
         return prompt_embeds
 
@@ -313,30 +752,39 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         )
 
         text_input_ids = text_inputs.input_ids
-        untruncated_ids = tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
-            removed_text = tokenizer.batch_decode(untruncated_ids[:, self.tokenizer_max_length - 1 : -1])
+        untruncated_ids = tokenizer(
+            prompt, padding="longest", return_tensors="pt"
+        ).input_ids
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
+            text_input_ids, untruncated_ids
+        ):
+            removed_text = tokenizer.batch_decode(
+                untruncated_ids[:, self.tokenizer_max_length - 1 : -1]
+            )
             logger.warning(
                 "The following part of your input was truncated because CLIP can only handle sequences up to"
                 f" {self.tokenizer_max_length} tokens: {removed_text}"
             )
-        prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
-        pooled_prompt_embeds = prompt_embeds[0]
+        prompt_embeds = text_encoder(text_input_ids)
+        pooled_prompt_embeds = torch.from_numpy(prompt_embeds[0])
+        hidden_states = list(prompt_embeds.values())[1:]
 
         if clip_skip is None:
-            prompt_embeds = prompt_embeds.hidden_states[-2]
+            prompt_embeds = torch.from_numpy(hidden_states[-2])
         else:
-            prompt_embeds = prompt_embeds.hidden_states[-(clip_skip + 2)]
-
-        prompt_embeds = prompt_embeds.to(dtype=self.text_encoder.dtype, device=device)
+            prompt_embeds = torch.from_numpy(hidden_states[-(clip_skip + 2)])
 
         _, seq_len, _ = prompt_embeds.shape
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_images_per_prompt, seq_len, -1
+        )
 
         pooled_prompt_embeds = pooled_prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        pooled_prompt_embeds = pooled_prompt_embeds.view(batch_size * num_images_per_prompt, -1)
+        pooled_prompt_embeds = pooled_prompt_embeds.view(
+            batch_size * num_images_per_prompt, -1
+        )
 
         return prompt_embeds, pooled_prompt_embeds
 
@@ -407,8 +855,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             lora_scale (`float`, *optional*):
                 A lora scale that will be applied to all LoRA layers of the text encoder if LoRA layers are loaded.
         """
-        device = device or self._execution_device
-
         # set lora scale so that monkey patched LoRA
         # function of text encoder can correctly access it
         if lora_scale is not None and isinstance(self, SD3LoraLoaderMixin):
@@ -435,14 +881,12 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
 
             prompt_embed, pooled_prompt_embed = self._get_clip_prompt_embeds(
                 prompt=prompt,
-                device=device,
                 num_images_per_prompt=num_images_per_prompt,
                 clip_skip=clip_skip,
                 clip_model_index=0,
             )
             prompt_2_embed, pooled_prompt_2_embed = self._get_clip_prompt_embeds(
                 prompt=prompt_2,
-                device=device,
                 num_images_per_prompt=num_images_per_prompt,
                 clip_skip=clip_skip,
                 clip_model_index=1,
@@ -453,15 +897,17 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                 prompt=prompt_3,
                 num_images_per_prompt=num_images_per_prompt,
                 max_sequence_length=max_sequence_length,
-                device=device,
             )
 
             clip_prompt_embeds = torch.nn.functional.pad(
-                clip_prompt_embeds, (0, t5_prompt_embed.shape[-1] - clip_prompt_embeds.shape[-1])
+                clip_prompt_embeds,
+                (0, t5_prompt_embed.shape[-1] - clip_prompt_embeds.shape[-1]),
             )
 
             prompt_embeds = torch.cat([clip_prompt_embeds, t5_prompt_embed], dim=-2)
-            pooled_prompt_embeds = torch.cat([pooled_prompt_embed, pooled_prompt_2_embed], dim=-1)
+            pooled_prompt_embeds = torch.cat(
+                [pooled_prompt_embed, pooled_prompt_2_embed], dim=-1
+            )
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             negative_prompt = negative_prompt or ""
@@ -469,12 +915,20 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             negative_prompt_3 = negative_prompt_3 or negative_prompt
 
             # normalize str to list
-            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+            negative_prompt = (
+                batch_size * [negative_prompt]
+                if isinstance(negative_prompt, str)
+                else negative_prompt
+            )
             negative_prompt_2 = (
-                batch_size * [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
+                batch_size * [negative_prompt_2]
+                if isinstance(negative_prompt_2, str)
+                else negative_prompt_2
             )
             negative_prompt_3 = (
-                batch_size * [negative_prompt_3] if isinstance(negative_prompt_3, str) else negative_prompt_3
+                batch_size * [negative_prompt_3]
+                if isinstance(negative_prompt_3, str)
+                else negative_prompt_3
             )
 
             if prompt is not None and type(prompt) is not type(negative_prompt):
@@ -489,35 +943,46 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                     " the batch size of `prompt`."
                 )
 
-            negative_prompt_embed, negative_pooled_prompt_embed = self._get_clip_prompt_embeds(
-                negative_prompt,
-                device=device,
-                num_images_per_prompt=num_images_per_prompt,
-                clip_skip=None,
-                clip_model_index=0,
+            negative_prompt_embed, negative_pooled_prompt_embed = (
+                self._get_clip_prompt_embeds(
+                    negative_prompt,
+                    device=device,
+                    num_images_per_prompt=num_images_per_prompt,
+                    clip_skip=None,
+                    clip_model_index=0,
+                )
             )
-            negative_prompt_2_embed, negative_pooled_prompt_2_embed = self._get_clip_prompt_embeds(
-                negative_prompt_2,
-                device=device,
-                num_images_per_prompt=num_images_per_prompt,
-                clip_skip=None,
-                clip_model_index=1,
+            negative_prompt_2_embed, negative_pooled_prompt_2_embed = (
+                self._get_clip_prompt_embeds(
+                    negative_prompt_2,
+                    device=device,
+                    num_images_per_prompt=num_images_per_prompt,
+                    clip_skip=None,
+                    clip_model_index=1,
+                )
             )
-            negative_clip_prompt_embeds = torch.cat([negative_prompt_embed, negative_prompt_2_embed], dim=-1)
+            negative_clip_prompt_embeds = torch.cat(
+                [negative_prompt_embed, negative_prompt_2_embed], dim=-1
+            )
 
             t5_negative_prompt_embed = self._get_t5_prompt_embeds(
                 prompt=negative_prompt_3,
                 num_images_per_prompt=num_images_per_prompt,
                 max_sequence_length=max_sequence_length,
-                device=device,
             )
 
             negative_clip_prompt_embeds = torch.nn.functional.pad(
                 negative_clip_prompt_embeds,
-                (0, t5_negative_prompt_embed.shape[-1] - negative_clip_prompt_embeds.shape[-1]),
+                (
+                    0,
+                    t5_negative_prompt_embed.shape[-1]
+                    - negative_clip_prompt_embeds.shape[-1],
+                ),
             )
 
-            negative_prompt_embeds = torch.cat([negative_clip_prompt_embeds, t5_negative_prompt_embed], dim=-2)
+            negative_prompt_embeds = torch.cat(
+                [negative_clip_prompt_embeds, t5_negative_prompt_embed], dim=-2
+            )
             negative_pooled_prompt_embeds = torch.cat(
                 [negative_pooled_prompt_embed, negative_pooled_prompt_2_embed], dim=-1
             )
@@ -532,7 +997,12 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                 # Retrieve the original scale by scaling back the LoRA layers
                 unscale_lora_layers(self.text_encoder_2, lora_scale)
 
-        return prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds
+        return (
+            prompt_embeds,
+            negative_prompt_embeds,
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+        )
 
     def check_inputs(
         self,
@@ -552,10 +1022,13 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         max_sequence_length=None,
     ):
         if height % 8 != 0 or width % 8 != 0:
-            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
+            raise ValueError(
+                f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
+            )
 
         if callback_on_step_end_tensor_inputs is not None and not all(
-            k in self._callback_tensor_inputs for k in callback_on_step_end_tensor_inputs
+            k in self._callback_tensor_inputs
+            for k in callback_on_step_end_tensor_inputs
         ):
             raise ValueError(
                 f"`callback_on_step_end_tensor_inputs` has to be in {self._callback_tensor_inputs}, but found {[k for k in callback_on_step_end_tensor_inputs if k not in self._callback_tensor_inputs]}"
@@ -580,12 +1053,24 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             raise ValueError(
                 "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined."
             )
-        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
-            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
-        elif prompt_2 is not None and (not isinstance(prompt_2, str) and not isinstance(prompt_2, list)):
-            raise ValueError(f"`prompt_2` has to be of type `str` or `list` but is {type(prompt_2)}")
-        elif prompt_3 is not None and (not isinstance(prompt_3, str) and not isinstance(prompt_3, list)):
-            raise ValueError(f"`prompt_3` has to be of type `str` or `list` but is {type(prompt_3)}")
+        elif prompt is not None and (
+            not isinstance(prompt, str) and not isinstance(prompt, list)
+        ):
+            raise ValueError(
+                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
+            )
+        elif prompt_2 is not None and (
+            not isinstance(prompt_2, str) and not isinstance(prompt_2, list)
+        ):
+            raise ValueError(
+                f"`prompt_2` has to be of type `str` or `list` but is {type(prompt_2)}"
+            )
+        elif prompt_3 is not None and (
+            not isinstance(prompt_3, str) and not isinstance(prompt_3, list)
+        ):
+            raise ValueError(
+                f"`prompt_3` has to be of type `str` or `list` but is {type(prompt_3)}"
+            )
 
         if negative_prompt is not None and negative_prompt_embeds is not None:
             raise ValueError(
@@ -622,7 +1107,9 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             )
 
         if max_sequence_length is not None and max_sequence_length > 512:
-            raise ValueError(f"`max_sequence_length` cannot be greater than 512 but is {max_sequence_length}")
+            raise ValueError(
+                f"`max_sequence_length` cannot be greater than 512 but is {max_sequence_length}"
+            )
 
     # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline.prepare_latents
     def prepare_latents(
@@ -652,7 +1139,8 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        # latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        latents = randn_tensor(shape, generator=generator)
 
         return latents
 
@@ -663,8 +1151,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         height,
         batch_size,
         num_images_per_prompt,
-        device,
-        dtype,
         do_classifier_free_guidance=False,
         guess_mode=False,
     ):
@@ -682,8 +1168,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             repeat_by = num_images_per_prompt
 
         image = image.repeat_interleave(repeat_by, dim=0)
-
-        image = image.to(device=device, dtype=dtype)
 
         if do_classifier_free_guidance and not guess_mode:
             image = torch.cat([image] * 2)
@@ -718,7 +1202,7 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         return self._interrupt
 
     @torch.no_grad()
-    @replace_example_docstring(EXAMPLE_DOC_STRING)
+    # @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
         prompt: Union[str, List[str]] = None,
@@ -865,24 +1349,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
 
-        controlnet_config = (
-            self.controlnet.config
-            if isinstance(self.controlnet, SD3ControlNetModel)
-            else self.controlnet.nets[0].config
-        )
-
-        # align format for control guidance
-        if not isinstance(control_guidance_start, list) and isinstance(control_guidance_end, list):
-            control_guidance_start = len(control_guidance_end) * [control_guidance_start]
-        elif not isinstance(control_guidance_end, list) and isinstance(control_guidance_start, list):
-            control_guidance_end = len(control_guidance_start) * [control_guidance_end]
-        elif not isinstance(control_guidance_start, list) and not isinstance(control_guidance_end, list):
-            mult = len(self.controlnet.nets) if isinstance(self.controlnet, SD3MultiControlNetModel) else 1
-            control_guidance_start, control_guidance_end = (
-                mult * [control_guidance_start],
-                mult * [control_guidance_end],
-            )
-
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
             prompt,
@@ -914,9 +1380,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = self._execution_device
-        dtype = self.transformer.dtype
-
         (
             prompt_embeds,
             negative_prompt_embeds,
@@ -934,7 +1397,6 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             negative_prompt_embeds=negative_prompt_embeds,
             pooled_prompt_embeds=pooled_prompt_embeds,
             negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-            device=device,
             clip_skip=self.clip_skip,
             num_images_per_prompt=num_images_per_prompt,
             max_sequence_length=max_sequence_length,
@@ -942,62 +1404,45 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
 
         if self.do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+            pooled_prompt_embeds = torch.cat(
+                [negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0
+            )
 
         # 3. Prepare control image
-        if controlnet_config.force_zeros_for_pooled_projection:
+        if self._force_zeros_for_pooled_projection:
             # instantx sd3 controlnet does not apply shift factor
             vae_shift_factor = 0
         else:
-            vae_shift_factor = self.vae.config.shift_factor
-        if isinstance(self.controlnet, SD3ControlNetModel):
-            control_image = self.prepare_image(
-                image=control_image,
-                width=width,
-                height=height,
-                batch_size=batch_size * num_images_per_prompt,
-                num_images_per_prompt=num_images_per_prompt,
-                device=device,
-                dtype=dtype,
-                do_classifier_free_guidance=self.do_classifier_free_guidance,
-                guess_mode=False,
-            )
-            height, width = control_image.shape[-2:]
+            vae_shift_factor = self.vae_shift_factor
 
-            control_image = self.vae.encode(control_image).latent_dist.sample()
-            control_image = (control_image - vae_shift_factor) * self.vae.config.scaling_factor
-        elif isinstance(self.controlnet, SD3MultiControlNetModel):
-            control_images = []
+        control_image = self.prepare_image(
+            image=control_image,
+            width=width,
+            height=height,
+            batch_size=batch_size * num_images_per_prompt,
+            num_images_per_prompt=num_images_per_prompt,
+            do_classifier_free_guidance=self.do_classifier_free_guidance,
+            guess_mode=False,
+        )
+        height, width = control_image.shape[-2:]
 
-            for control_image_ in control_image:
-                control_image_ = self.prepare_image(
-                    image=control_image_,
-                    width=width,
-                    height=height,
-                    batch_size=batch_size * num_images_per_prompt,
-                    num_images_per_prompt=num_images_per_prompt,
-                    device=device,
-                    dtype=dtype,
-                    do_classifier_free_guidance=self.do_classifier_free_guidance,
-                    guess_mode=False,
-                )
-
-                control_image_ = self.vae.encode(control_image_).latent_dist.sample()
-                control_image_ = (control_image_ - vae_shift_factor) * self.vae.config.scaling_factor
-
-                control_images.append(control_image_)
-
-            control_image = control_images
-        else:
-            assert False
+        control_image = torch.from_numpy(self.vae_encoder(control_image.numpy())[0])
+        control_image = (control_image - vae_shift_factor) * self.vae_scaling_factor
 
         # 4. Prepare timesteps
-        timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, sigmas=sigmas)
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        # timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, sigmas=sigmas)
+        timesteps, num_inference_steps = retrieve_timesteps(
+            self.scheduler, num_inference_steps, sigmas=sigmas
+        )
+
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
         # 5. Prepare latent variables
-        num_channels_latents = self.transformer.config.in_channels
+        # num_channels_latents = self.transformer.config.in_channels
+        num_channels_latents = 16
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,
@@ -1009,24 +1454,16 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
             latents,
         )
 
-        print("**************************** latents.shape:  ", latents.shape)
-
         # 6. Create tensor stating which controlnets to keep
-        controlnet_keep = []
-        for i in range(len(timesteps)):
-            keeps = [
-                1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
-                for s, e in zip(control_guidance_start, control_guidance_end)
-            ]
-            controlnet_keep.append(keeps[0] if isinstance(self.controlnet, SD3ControlNetModel) else keeps)
-
-        if controlnet_config.force_zeros_for_pooled_projection:
+        if self._force_zeros_for_pooled_projection:
             # instantx sd3 controlnet used zero pooled projection
             controlnet_pooled_projections = torch.zeros_like(pooled_prompt_embeds)
         else:
-            controlnet_pooled_projections = controlnet_pooled_projections or pooled_prompt_embeds
+            controlnet_pooled_projections = (
+                controlnet_pooled_projections or pooled_prompt_embeds
+            )
 
-        if controlnet_config.joint_attention_dim is not None:
+        if self._joint_attention_dim is not None:
             controlnet_encoder_hidden_states = prompt_embeds
         else:
             # SD35 official 8b controlnet does not use encoder_hidden_states
@@ -1039,64 +1476,54 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
                     continue
 
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+                latent_model_input = (
+                    torch.cat([latents] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents
+                )
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
 
-                if isinstance(controlnet_keep[i], list):
-                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
-                else:
-                    controlnet_cond_scale = controlnet_conditioning_scale
-                    if isinstance(controlnet_cond_scale, list):
-                        controlnet_cond_scale = controlnet_cond_scale[0]
-                    cond_scale = controlnet_cond_scale * controlnet_keep[i]
-                print("***************************************** [Controlnet Inputs] ******************************")
-                print("latent_model_input.shape: ", latent_model_input.shape)
-                print("timestep.shape: ", timestep.shape)
-                print("encoder_hidden_states.shape: ", controlnet_encoder_hidden_states.shape)
-                print("pooled_projections.shape: ", controlnet_pooled_projections.shape)
-                print("self.joint_attention_kwargs: ", self.joint_attention_kwargs)
-                print("controlnet_cond.shape: ", control_image.shape)
-                print("conditioning_scale: ", cond_scale)
                 # controlnet(s) inference
-                control_block_samples = self.controlnet(
-                    hidden_states=latent_model_input,
-                    timestep=timestep,
-                    encoder_hidden_states=controlnet_encoder_hidden_states,
-                    pooled_projections=controlnet_pooled_projections,
-                    joint_attention_kwargs=self.joint_attention_kwargs,
-                    controlnet_cond=control_image,
-                    conditioning_scale=cond_scale,
-                    return_dict=False,
-                )[0]
+                controlnet_inputs = {
+                    "hidden_states": latent_model_input,
+                    "controlnet_cond": control_image,
+                    "encoder_hidden_states": controlnet_encoder_hidden_states,
+                    "pooled_projections": controlnet_pooled_projections,
+                    "timestep": timestep,
+                }
+                # print("controlnet_inputs: ", controlnet_inputs)
 
-                print("***************************************** [Transformer Inputs] ******************************")
-                print("latent_model_input.shape: ", latent_model_input.shape)
-                print("timestep.shape: ", timestep.shape)
-                print("prompt_embeds.shape: ", prompt_embeds.shape)
-                print("pooled_projections.shape: ", pooled_prompt_embeds.shape)
-                print("len(control_block_samples): ", len(control_block_samples))
-                print("control_block_samples[0].shape: ", control_block_samples[0].shape)
-                #print("len(control_block_samples): ", len(control_block_samples))
-                print("self.joint_attention_kwargs: ", self.joint_attention_kwargs)
-                noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
-                    timestep=timestep,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_prompt_embeds,
-                    block_controlnet_hidden_states=control_block_samples,
-                    joint_attention_kwargs=self.joint_attention_kwargs,
-                    return_dict=False,
-                )[0]
+                controlnet_outputs = self.controlnet(controlnet_inputs)
+                # print("controlnet_outputs: ", controlnet_outputs)
+
+                # print("self.transformer.inputs:", self.transformer.inputs)
+                transformer_inputs = {
+                    "hidden_states": latent_model_input,
+                    "timestep": timestep,
+                    "encoder_hidden_states": prompt_embeds,
+                    "pooled_projections": pooled_prompt_embeds,
+                }
+                for i in range(len(controlnet_outputs)):
+                    transformer_inputs[
+                        CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i + 1)
+                    ] = controlnet_outputs[i]
+
+                noise_pred = torch.from_numpy(self.transformer(transformer_inputs)[0])
+                # print("noise_pred: ", noise_pred)
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
@@ -1111,25 +1538,27 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
 
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-                    negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
+                    negative_prompt_embeds = callback_outputs.pop(
+                        "negative_prompt_embeds", negative_prompt_embeds
+                    )
                     negative_pooled_prompt_embeds = callback_outputs.pop(
                         "negative_pooled_prompt_embeds", negative_pooled_prompt_embeds
                     )
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         if output_type == "latent":
             image = latents
 
         else:
-            latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
+            latents = (latents / self.vae_scaling_factor) + self.vae_shift_factor
 
-            image = self.vae.decode(latents, return_dict=False)[0]
+            # image = self.vae.decode(latents, return_dict=False)[0]
+            image = torch.from_numpy(self.vae_decoder(latents)[0])
             image = self.image_processor.postprocess(image, output_type=output_type)
 
         # Offload all models
@@ -1140,27 +1569,119 @@ class StableDiffusion3ControlNetPipeline(DiffusionPipeline, SD3LoraLoaderMixin, 
 
         return StableDiffusion3PipelineOutput(images=image)
 
-# load pipeline
-controlnet = SD3ControlNetModel.from_pretrained("SD3-Controlnet-Depth")
-pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-    "stable-diffusion-3-medium-diffusers",
-    controlnet=controlnet
-)
-#pipe.to("cuda", torch.float16)
 
-# config
-control_image = load_image("depth.jpeg")
-prompt = "a panda cub, captured in a close-up, in forest, is perched on a tree trunk. good composition, Photography, the cub's ears, a fluffy black, are tucked behind its head, adding a touch of whimsy to its appearance. a lush tapestry of green leaves in the background. depth of field, National Geographic"
-n_prompt = "bad hands, blurry, NSFW, nude, naked, porn, ugly, bad quality, worst quality"
+def init_sd3_controlnet_pipeline(
+    models_dict: Dict[str, Any], device: str, use_hypersd: bool, text_encoder_3_dim=4096
+):
+    pipeline_args = {}
 
-# to reproduce result in our example
-generator = torch.Generator(device="cpu").manual_seed(4000)
-image = pipe(
-    prompt, 
-    negative_prompt=n_prompt, 
-    control_image=control_image, 
-    controlnet_conditioning_scale=0.5,
-    guidance_scale=7.0,
-    generator=generator
-).images[0]
-image.save('image.jpg')
+    ov_config = {"CACHE_DIR": "model_cache"}
+    if "GPU" in device:
+        ov_config["INFERENCE_PRECISION_HINT"] = "f16"
+        ov_config["ACTIVATIONS_SCALE_FACTOR"] = "10"
+
+    print("Models compilation")
+    core = ov.Core()
+    for model_name, model_path in models_dict.items():
+        pipeline_args[model_name] = core.compile_model(
+            model_path, device, ov_config if "text_encoder" in model_name else {}
+        )
+        print(f"{model_name} - Done!")
+
+    scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(MODEL_DIR / "scheduler")
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR / "tokenizer")
+    tokenizer_2 = AutoTokenizer.from_pretrained(MODEL_DIR / "tokenizer_2")
+    tokenizer_3 = (
+        AutoTokenizer.from_pretrained(MODEL_DIR / "tokenizer_3")
+        if "text_encoder_3" in models_dict
+        else None
+    )
+
+    pipeline_args["scheduler"] = scheduler
+    pipeline_args["tokenizer"] = tokenizer
+    pipeline_args["tokenizer_2"] = tokenizer_2
+    pipeline_args["tokenizer_3"] = tokenizer_3
+    pipeline_args["text_encoder_3_dim"] = text_encoder_3_dim
+    ov_pipe = OVStableDiffusion3ControlNetPipeline(**pipeline_args)
+    return ov_pipe
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        "Stable Diffusion 3 Controlnet with OpenVNIO",
+        add_help=True,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "-m",
+        "--model_id",
+        help="Model folder including Stable Diffusion 3 Medium Pytorch model",
+        type=str,
+        default="stable-diffusion-3-medium-diffusers",
+    )
+    parser.add_argument(
+        "-l",
+        "--lora_path",
+        help="Model folder including HyperSD LoRA for Stable Diffusion 3 Medium Pytorch models",
+        type=str,
+        default="Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors",
+    )
+    parser.add_argument(
+        "-c",
+        "--controlnet_dir",
+        help="Model folder including Controlnets for Stable Diffusion 3 Medium Pytorch models",
+        type=str,
+        default="InstantX",
+    )
+    parser.add_argument(
+        "--load_t5",
+        default=True,
+        type=bool,
+        help="Whether use T5XXL as Text Encoder 3 for image generation",
+    )
+    parser.add_argument(
+        "--use_hypersd",
+        default=True,
+        type=bool,
+        help="Whether use HyperSD LoRA for image generation",
+    )
+    parser.add_argument(
+        "--use_t5_int4",
+        default=True,
+        type=bool,
+        help="Whether apply NNCF INT4 weight compression for T5XXL",
+    )
+
+    args = parser.parse_args()
+    print("Args: ", args)
+
+    load_t5 = args.load_t5
+    use_t5_int4 = args.use_t5_int4
+    use_hypersd = args.use_hypersd
+    model_id = args.model_id
+    lora_path = args.lora_path
+    controlnet_dir = args.controlnet_dir
+
+    for subdir in os.listdir(controlnet_dir):
+        controlnet_path = Path(controlnet_dir) / subdir
+        print("controlnet_path: ", controlnet_path)
+        if "canny" in str(controlnet_path).lower():
+            CONTROLNET_PATH = CONTROLNET_PATH_CANNY
+        elif "pose" in str(controlnet_path).lower():
+            CONTROLNET_PATH = CONTROLNET_PATH_POSE
+        elif "tile" in str(controlnet_path).lower():
+            CONTROLNET_PATH = CONTROLNET_PATH_TILE
+        else:
+            print("Error! Found unsupported controlnet for SD3: ", controlnet_path)
+            exit(1)
+
+        convert_sd3(
+            load_t5=load_t5,
+            use_t5_int4=use_t5_int4,
+            use_hypersd=use_hypersd,
+            model_id=model_id,
+            lora_path=lora_path,
+            controlnet_path=controlnet_path,
+        )
+    print("OpenVINO model conversion finished, saved models in path: ", MODEL_DIR)
