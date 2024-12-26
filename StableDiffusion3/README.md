@@ -36,7 +36,7 @@ python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --he
 python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --height 512 --controlnet_type tile --image_path assets/tile.jpg --device GPU
 ```
 
-### (Optional) 5. Run SD3 + HyperSD + Controlnet Inference with Pytorch
+### 5. (Optional) Run SD3 + HyperSD + Controlnet Inference with Pytorch
 ```bash
 # Canny
 python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Canny --image_path assets/canny.jpg
