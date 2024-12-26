@@ -24,7 +24,7 @@ huggingface-cli download --resume-download InstantX/SD3-Controlnet-Tile --local-
 python convert_sd3_controlnet.py -m stabilityai/stable-diffusion-3-medium-diffusers -l Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors -c InstantX 
 ```
 
-### 4. Run  Stable Diffusion 3 + HyperSD + Controlnet Canny with Inference OpenVINO
+### 4. Run Stable Diffusion 3 + HyperSD + Controlnet Canny with Inference OpenVINO
 ```bash
 python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --height 512 --controlnet_type canny --image_path assets/canny.jpg --device GPU 
 ```
