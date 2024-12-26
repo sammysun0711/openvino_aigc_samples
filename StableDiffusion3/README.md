@@ -19,7 +19,7 @@ huggingface-cli download --resume-download InstantX/SD3-Controlnet-Pose --local-
 huggingface-cli download --resume-download InstantX/SD3-Controlnet-Tile --local-dir InstantX/SD3-Controlnet-Tile
 ```
 
-### 3. Convert SD3 + HyperSD + Contorlnet Pytorch Model to OpenVINO Model
+### 3. Convert SD3 + HyperSD + Controlnet Pytorch Model to OpenVINO Model
 ```bash
 python convert_sd3_controlnet.py -m stabilityai/stable-diffusion-3-medium-diffusers -l Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors -c InstantX 
 ```
