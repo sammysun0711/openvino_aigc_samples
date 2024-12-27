@@ -22,10 +22,9 @@ huggingface-cli download --resume-download InstantX/SD3-Controlnet-Tile --local-
 ### 3. Convert SD3 + HyperSD + Controlnet Pytorch Model to OpenVINO Model
 ```bash
 python convert_sd3_controlnet.py -m stabilityai/stable-diffusion-3-medium-diffusers -l Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors -c InstantX --use_t5_int4
-python convert_sd3_controlnet.py -m stabilityai/stable-diffusion-3-medium-diffusers -l Hyper-SD/Hyper-SD3-4steps-CFG-lora.safetensors -c InstantX --use_t5_int4
 ```
 
-### 4. Run Stable Diffusion 3 + HyperSD + Controlnet Canny with Inference OpenVINO
+### 4. Run Stable Diffusion 3 + HyperSD + Controlnet Infernce with OpenVINO
 ```bash
 # Canny
 python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --height 512 --controlnet_type canny --image_path assets/canny.jpg --device GPU --use_t5_int4
@@ -37,9 +36,16 @@ python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --he
 python sd3_controlnet_ov.py -m stable-diffusion-3-controlnet-ov --width 512 --height 512 --controlnet_type tile --image_path assets/tile.jpg --device GPU --use_t5_int4
 ```
 
-### (Optional) 7. Run Stable Diffusion 3 + HyperSD + Controlnet Canny Inference with Pytorch
+### (Optional) 5. Run Stable Diffusion 3 + HyperSD + Controlnet with Pytorch
 ```bash
+# Canny
 python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Canny --image_path assets/canny.jpg
+
+# Pose
+python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Pose --image_path assets/pose.jpg
+
+# Tile
+python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Tile --image_path assets/tile.jpg
 ```
 
 ### (Optional) 8. Run Stable Diffusion 3 + HyperSD + Controlnet Pose Inference with Pytorch
