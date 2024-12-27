@@ -47,13 +47,3 @@ python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/
 # Tile
 python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Tile --image_path assets/tile.jpg
 ```
-
-### (Optional) 8. Run Stable Diffusion 3 + HyperSD + Controlnet Pose Inference with Pytorch
-```bash
-python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Pose --image_path assets/pose.jpg
-```
-
-### (Optional) 9. Run Stable Diffusion 3 + HyperSD + Controlnet Tile Inference with Pytorch
-```bash
-python sd3_controlnet_pt.py --width 512 --height 512 --controlnet_path InstantX/SD3-Controlnet-Tile --image_path assets/tile.jpg
-```
