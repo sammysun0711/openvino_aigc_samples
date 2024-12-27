@@ -1454,6 +1454,14 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                     "pooled_projections": controlnet_pooled_projections,
                     "timestep": timestep,
                 }
+                """
+                print("============================ Controlnet input shape ====================================")
+                print("hidden_states.shape: ", latent_model_input.shape)
+                print("controlnet_cond.shape: ", control_image.shape)
+                print("controlnet_encoder_hidden_states.shape: ", controlnet_encoder_hidden_states.shape)
+                print("pooled_projections.shape: ", controlnet_pooled_projections.shape)
+                print("timestep.shape: ", timestep)
+                """
                 # print("controlnet_inputs: ", controlnet_inputs)
                 prepare_controlnet_input_dur = time.perf_counter() - start
                 print(
@@ -1476,6 +1484,14 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                     "encoder_hidden_states": prompt_embeds,
                     "pooled_projections": pooled_prompt_embeds,
                 }
+                """
+                print("============================ Transformer input shape ====================================")
+                print("hidden_states.shape: ", latent_model_input.shape)
+                print("timestep.shape: ", timestep.shape)
+                print("encoder_hidden_states.shape: ", prompt_embeds.shape)
+                print("pooled_projections.shape: ", pooled_prompt_embeds.shape)
+                print("controlnet_outputs[0].shape: ", controlnet_outputs[0].shape)
+                """
                 for i in range(len(controlnet_outputs)):
                     transformer_inputs[
                         CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i + 1)
@@ -1658,14 +1674,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_t5_int4",
-        default=True,
-        type=bool,
+        default=False,
+        action="store_true",
         help="Whether use INT4 weight compressed T5XXL",
     )
     parser.add_argument(
         "--use_transformer_int8",
-        default=True,
-        type=bool,
+        default=False,
+        action="store_true",
         help="Whether use INT8 quantized transformer model",
     )
     args = parser.parse_args()

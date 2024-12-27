@@ -1772,14 +1772,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_t5_int4",
-        default=True,
-        type=bool,
-        help="Whether apply NNCF INT4 weight compression for T5XXL",
+        default=False,
+        action="store_true",
+        help="Whether use INT4 weight compressed T5XXL",
     )
     parser.add_argument(
         "--use_transformer_int8",
-        default=True,
-        type=bool,
+        default=False,
+        action="store_true",
         help="Whether use INT8 quantized transformer model",
     )
 
