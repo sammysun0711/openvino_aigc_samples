@@ -386,7 +386,7 @@ def convert_sd3_transformer(transformer):
 
 def compress_model(model, save_path, group_size=128, ratio=1.0):
     if not save_path.exists():
-        print(f"Model compression started")
+        print("*** Model compression started ***")
         print(
             f"Compression parameters:\n\tmode = {nncf.CompressWeightsMode.INT4_SYM}\n\tratio = {ratio}\n\tgroup_size = {group_size}"
         )
@@ -396,9 +396,9 @@ def compress_model(model, save_path, group_size=128, ratio=1.0):
             ratio=ratio,
             group_size=group_size,
         )
-        print(f"model compression finished")
         ov.save_model(compressed_model, save_path)
         del compressed_model
+        print("*** Model compression end ***")
 
 
 def convert_t5_model(text_encoder, use_t5_int4):
@@ -503,63 +503,65 @@ def convert_sd3(
         return
 
     if load_t5 and not use_t5_int4 and not TEXT_ENCODER_3_PATH.exists():
-        print("T5 encoder model conversion started")
+        print("*** T5 encoder model conversion started ***")
         convert_t5_model(text_encoder_3, use_t5_int4)
         del text_encoder_3
         gc.collect()
-        print("T5 encoder conversion finished")
+        print("*** T5 encoder conversion finished ***")
     elif load_t5 and use_t5_int4 and not TEXT_ENCODER_3_INT4_PATH.exists():
-        print("T5 encoder INT4 model conversion started")
+        print("*** T5 encoder INT4 model conversion started ***")
         convert_t5_model(text_encoder_3, use_t5_int4)
         del text_encoder_3
         gc.collect()
-        print("T5 encoder INT4 conversion finished")
+        print("*** T5 encoder INT4 conversion finished ***")
     elif load_t5:
         print("Found converted T5 encoder model")
 
     if not TEXT_ENCODER_PATH.exists():
-        print("Clip Text encoder 1 conversion started")
+        print("*** Clip Text encoder 1 conversion started ***")
         convert_clip_model(text_encoder, TEXT_ENCODER_PATH)
         del text_encoder
         gc.collect()
-        print("Clip Text encoder 1 conversion finished")
+        print("*** Clip Text encoder 1 conversion finished ***")
     else:
         print("Found converted Clip Text encoder 1")
 
     if not TEXT_ENCODER_2_PATH.exists():
-        print("Clip Text encoder 2 conversion started")
+        print("*** Clip Text encoder 2 conversion started ***")
         convert_clip_model(text_encoder_2, TEXT_ENCODER_2_PATH)
         del text_encoder_2
         gc.collect()
-        print("Clip Text encoder 2 conversion finished")
+        print("*** Clip Text encoder 2 conversion finished ***")
     else:
         print("Found converted Clip Text encoder 2")
 
     if not VAE_ENCODER_PATH.exists():
-        print("VAE encoder conversion started")
+        print("*** VAE encoder conversion started ***")
         convert_vae_encoder(vae)
         # del vae
         gc.collect()
+        print("*** VAE encoder conversion end ***")
 
     if not VAE_DECODER_PATH.exists():
-        print("VAE decoder conversion started")
+        print("*** VAE decoder conversion started ***")
         convert_vae_decoder(vae)
         # del vae
         gc.collect()
+        print("*** VAE decoder conversion end ***")
 
     if not CONTROLNET_PATH.exists():
-        print("Controlnet conversion started")
+        print("*** Controlnet conversion started ***")
         inputs.pop()
         convert_controlnet(controlnet)
         del controlnet
         gc.collect()
 
     if not TRANSFORMER_PATH.exists():
-        print("Transformer model conversion started")
+        print("*** Transformer model conversion started ***")
         convert_sd3_transformer(transformer)
         del transformer
         gc.collect()
-        print("Transformer model conversion finished")
+        print("*** Transformer model conversion finished ***")
 
     else:
         print("Found converted transformer model")
@@ -567,6 +569,7 @@ def convert_sd3(
 
 def quantize_transformer(ov_pipe, control_image):
     if not TRANSFORMER_INT8_PATH.exists():
+        print("*** transformer INT8 quantization start ***")
         calibration_dataset_size = 200
         print("Calibration data collection started")
         unet_calibration_data = collect_calibration_data(
@@ -598,6 +601,7 @@ def quantize_transformer(ov_pipe, control_image):
         )
 
         ov.save_model(quantized_model, TRANSFORMER_INT8_PATH)
+        print("*** transformer INT8 quantization end ***")
 
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.retrieve_timesteps
@@ -1785,7 +1789,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     print("Args: ", args)
-
+    print("OpenVINO version: ", ov.get_version())
     load_t5 = args.load_t5
     use_t5_int4 = args.use_t5_int4
     use_transformer_int8 = args.use_transformer_int8

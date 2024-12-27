@@ -1686,6 +1686,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     print("Args: ", args)
+    print("OpenVINO version: ", ov.get_version())
 
     load_t5 = args.load_t5
     use_t5_int4 = args.use_t5_int4
@@ -1720,14 +1721,18 @@ if __name__ == "__main__":
     }
 
     if load_t5 and not use_t5_int4:
+        print("------------------- Use Text Encoder FP16 Model -------------------------")
         models_dict["text_encoder_3"] = TEXT_ENCODER_3_PATH
 
     if load_t5 and use_t5_int4:
+        print("------------------- Use Text Encoder INT4 Model -------------------------")
         models_dict["text_encoder_3"] = TEXT_ENCODER_3_INT4_PATH
 
     if use_transformer_int8:
+        print("------------------- Use Transformer INT8 Model -------------------------")
         models_dict["transformer"] = TRANSFORMER_INT8_PATH
     else:
+        print("------------------- Use Transformer FP16 Model -------------------------")
         models_dict["transformer"] = TRANSFORMER_PATH
 
     print("Pipeline initialization start ...")
