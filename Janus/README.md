@@ -18,9 +18,9 @@ python convert_janus.py -m Janus-Pro-1B -o Janus-Pro-1B-OV
 
 ### 4. Run Janus for multimodal understanding task with OpenVINO
 ```python
- python run_janus_vlm_ov.py -m Janus-Pro-1B-OV -p "Describe image in details" -i cat_in_box.png -d CPU
+python run_janus_vlm_ov.py -m Janus-Pro-1B-OV -p "Describe image in details" -i cat_in_box.png -d GPU
 ```
 ### 5. Run Janus for text-to-image task with OpenVINO
 ```python
-python run_janus_t2i_ov.py -m Janus-Pro-1B-OV -d CPU
+python run_janus_t2i_ov.py -m Janus-Pro-1B-OV -d GPU
 ```

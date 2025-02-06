@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 import argparse
 from janus.models import VLChatProcessor
 from PIL import Image
@@ -19,9 +20,7 @@ parser.add_argument(
     help="Model folder including Janus-Pro OpenVINO Models",
 )
 
-parser.add_argument(
-        "-d", "--device", default="CPU", type=str, help="Inference device"
-    )
+parser.add_argument("-d", "--device", default="CPU", type=str, help="Inference device")
 parser.add_argument(
     "-cd",
     "--cache_dir",
@@ -64,9 +63,14 @@ image_path = Path(args.image_path)
 max_new_tokens = args.max_new_tokens
 
 ov_config = {"CACHE_DIR": cache_dir}
-model = OVModelForVisualCausalLM.from_pretrained(model_id, comiple=False, trust_remote_code=True, ov_config=ov_config)
+start = time.time()
+model = OVModelForVisualCausalLM.from_pretrained(
+    model_id, comiple=False, trust_remote_code=True, ov_config=ov_config
+)
 model.to(device)
 model.compile()
+pipe_init_duration = time.time() - start
+print(f"Init Pipeline took: {pipe_init_duration:.3f} s")
 
 processor = VLChatProcessor.from_pretrained(model_id, trust_remote_code=True)
 
@@ -79,4 +83,10 @@ inputs = model.preprocess_inputs(input_prompt, image, processor)
 print(f"Response: \n")
 streamer = TextStreamer(processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
-model.generate(**inputs, streamer=streamer, max_new_tokens=max_new_tokens, do_sample=False)
+start = time.time()
+model.generate(
+    **inputs, streamer=streamer, max_new_tokens=max_new_tokens, do_sample=False
+)
+generation_duration = time.time() - start
+
+print(f"LLM generation took: {generation_duration:.3f} s")
