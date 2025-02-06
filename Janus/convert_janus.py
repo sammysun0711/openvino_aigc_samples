@@ -1,18 +1,36 @@
-from io import BytesIO
+import argparse
 from pathlib import Path
-
-import requests
 from janus.models import VLChatProcessor
-from PIL import Image
-from transformers import TextStreamer, AutoTokenizer
-
+from transformers import AutoTokenizer
 from optimum.intel.openvino import OVModelForVisualCausalLM
 
-model_id = "Janus-Pro-1B"
-save_dir = "Janus-Pro-1B-OV"
+parser = argparse.ArgumentParser(
+    "DeepSeek Janus-Pro Pytorch to OpenVINO Model Conversion Tool",
+    add_help=True,
+    formatter_class=argparse.RawTextHelpFormatter,
+)
+parser.add_argument(
+    "-m",
+    "--model_id",
+    type=str,
+    default="Janus-Pro-1B",
+    help="Model folder including Janus-Pro Pytorch Models",
+)
 
+parser.add_argument(
+    "-o",
+    "--save_dir",
+    type=str,
+    default="Janus-Pro-1B-OV",
+    help="Model folder to save converted Janus-Pro OpenVINO Models",
+)
 
-model = OVModelForVisualCausalLM.from_pretrained(model_id, trust_remote_code=True)
+args = parser.parse_args()
+
+model_id = args.model_id
+save_dir = args.save_dir
+
+model = OVModelForVisualCausalLM.from_pretrained(model_id, export=True, trust_remote_code=True)
 model.save_pretrained(save_dir)
 
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
