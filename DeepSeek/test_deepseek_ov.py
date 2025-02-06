@@ -3,8 +3,13 @@ import queue
 import threading
 import argparse
 
+# optimum-cli export openvino --model DeepSeek-R1-Distill-Qwen-1.5B --weight-format fp16 DeepSeek-R1-Distill-Qwen-1.5B-OV-FP16 --task text-generation-with-past --trust-remote-code
+# optimum-cli export openvino --model DeepSeek-R1-Distill-Qwen-1.5B --weight-format int4 --group-size 64 --ratio 1.0 DeepSeek-R1-Distill-Qwen-1.5B-OV-INT4 --task text-generation-with-past --trust-remote-code
+# optimum-cli export openvino --model DeepSeek-R1-Distill-Qwen-7B --weight-format int4 --group-size 64 --ratio 1.0 DeepSeek-R1-Distill-Qwen-7B-OV-INT4 --task text-generation-with-past --trust-remote-code
+# optimum-cli export openvino --model DeepSeek-R1-Distill-Llama-8B --weight-format int4 --group-size 64 --ratio 1.0 DeepSeek-R1-Distill-Llama-8B-OV-INT4 --task text-generation-with-past --trust-remote-code
+
 chat_templates = {
-    "DeepSeek-R1-Distill-Qwen-1.5B": {
+    "DeepSeek-R1": {
         "code-gen": "system\n下面这段的代码的效率很低，且没有处理边界情况。请先解释这段代码的问题与解决方法，然后进行优化：\n{prompt}",
         "code-explain": "system\n请解释下面这段代码的逻辑，并说明完成了什么功能：\n{prompt}",
         "content-classification": "system\n#### 定位\n- 智能助手名称：新闻分类专家\n- 主要任务：对输入的新闻文本进行自动分类，识别其所属的新闻种类。\n\n#### 能力\n- 文本分析 ：能够准确分析新闻文本的内容和结构。\n- 分类识: 根据分析结果，将新闻文本分类到预定义的种类中。\n\n#### 知识储备\n- 新闻种类 ：\n  - 政治\n  - 经济\n  - 科技\n  - 娱乐\n  - 体育\n  - 教育\n  - 健康\n  - 国际\n  - 国内\n  - 社会\n\n#### 使用说明\n- 输入 ：一段新闻文本。\n- 输出 ：只输出新闻文本所属的种类，不需要额外解释。user\n: {prompt}",
@@ -14,9 +19,6 @@ chat_templates = {
         "translation": "system\n你是一个中英文翻译专家，将用户输入的中文翻译成英文，或将用户输入的英文翻译成中文。对于非中文内容，它将提供中文翻译结果。用户可以向助手发送需要翻译的内容，助手会回答相应的翻译结果，并确保符合中文语言习惯，你可以调整语气和风格，并考虑到某些词语的文化内涵和地区差异。同时作为翻译家，需将原文翻译成具有信达雅标准的译文。'信' 即忠实于原文的内容与意图；'达' 意味着译文应通顺易懂，表达清晰；'雅' 则追求译文的文化审美和语言的优美。目标是创作出既忠于原作精神，又符合目标语言文化和读者审美的翻译。user\n: {prompt}",
     }
 }
-
-# optimum-cli export openvino --model DeepSeek-R1-Distill-Qwen-1.5B --weight-format fp16 DeepSeek-R1-Distill-Qwen-1.5B-OV-FP16 --task text-generation-with-past --trust-remote-code
-# optimum-cli export openvino --model DeepSeek-R1-Distill-Qwen-1.5B --weight-format int4 --group-size 64 --ratio 1.0 DeepSeek-R1-Distill-Qwen-1.5B-OV-INT4 --task text-generation-with-past --trust-remote-code
 
 
 class IterableStreamer(openvino_genai.StreamerBase):
@@ -153,17 +155,21 @@ class ChunkStreamer(IterableStreamer):
         return super().put(token_id)
 
 
-def stream_chat(pipe, prompt, max_tokens):
+def stream_chat(pipe, prompt, max_tokens, model_type="qwen"):
     config = openvino_genai.GenerationConfig()
     config.max_new_tokens = max_tokens
-    config.eos_token_id = 151643
-    config.stop_token_ids = {151643, 151647}
+    if model_type == "qwen":
+        config.eos_token_id = 151643
+        config.stop_token_ids = {151643, 151647}
+    elif model_type == "llama":
+        config.eos_token_id = 128001
+        config.stop_token_ids = {128001}
+
     config.do_sample = False
     config.repetition_penalty = 1.1
     config.top_k = 50
     config.top_p = 0.95
     text_print_streamer = IterableStreamer(pipe.get_tokenizer())
-
     printer_thread = threading.Thread(
         target=pipe.generate, args=(prompt, config, text_print_streamer)
     )
@@ -208,6 +214,11 @@ def main():
     model_dir = args.model_dir
     cache_dir = args.cache_dir
     max_new_tokens = args.max_new_tokens
+    model_type = ""
+    if "qwen" in str(model_dir).lower():
+        model_type = "qwen"
+    elif "llama" in str(model_dir).lower():
+        model_type = "llama"
     ov_config = {"CACHE_DIR": cache_dir}
     pipe = openvino_genai.LLMPipeline(model_dir, device, **ov_config)
 
@@ -221,7 +232,7 @@ def main():
         "translation": "牛顿第一定律：任何一个物体总是保持静止状态或者匀速直线运动状态，直到有作用在它上面的外力迫使它改变这种状态为止。 如果作用在物体上的合力为零，则物体保持匀速直线运动。 即物体的速度保持不变且加速度为零。",
     }
 
-    template = chat_templates.get("DeepSeek-R1-Distill-Qwen-1.5B")
+    template = chat_templates.get("DeepSeek-R1")
     for task, prompt in prompts.items():
         print(
             f"============================== Run task: {task} =============================="
@@ -229,9 +240,10 @@ def main():
         print("prompt:\n", prompt)
         question = template.get(task).format_map({"prompt": prompt})
         print("response:\n")
-        for output in stream_chat(pipe, question, max_new_tokens):
+        for output in stream_chat(pipe, question, max_new_tokens, model_type):
             print(output, end="", flush=True)
         print("\n")
+        pipe.finish_chat()
 
 
 if "__main__" == __name__:
