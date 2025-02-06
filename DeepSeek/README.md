@@ -1,5 +1,11 @@
 ## DeepSeek-R1 Distill Model Enabling with OpenVINO
 
+### Verfied models with prompts from DeepSeek [prompt-library](https://api-docs.deepseek.com/zh-cn/prompt-library): 
+- [DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B)
+- [DeepSeek-R1-Distill-Qwen-7B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B)
+- [DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)
+
+
 ### 1. Setup Python Environment
 ```bash
 conda create -n deepseek-ov python=3.10
