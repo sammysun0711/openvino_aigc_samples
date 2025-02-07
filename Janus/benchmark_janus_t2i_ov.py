@@ -64,6 +64,7 @@ ov_config = {"CACHE_DIR": cache_dir}
 print("Inference device: ", device)
 input_token_lengths = []
 max_rss_mem_list = []
+max_uss_mem_list = []
 pipeline_latency = []
 img_size = 384
 
@@ -99,6 +100,7 @@ for i in range(num_interation):
         mem_consumption.get_max_memory_consumption()
     )
     max_rss_mem_list.append(max_rss_mem)
+    max_uss_mem_list.append(max_uss_mem)
     mem_consumption.clear_max_memory_consumption()
 
     print(f"First input token size: ", input_token_lengths[-1])
@@ -106,6 +108,7 @@ for i in range(num_interation):
         f"E2E pipeline for {img_size}x{img_size} Image generation took: {generation_duration:.3f} s"
     )
     print("Max RSS Memory Usage: {:.2f} MB".format(max_rss_mem))
+    print("Max USS Memory Usage: {:.2f} MB".format(max_uss_mem))
 
 print(f"Save generated image in path: {save_path}")
 images[0].save(save_path)
@@ -116,6 +119,7 @@ print(f"[Summary] Performance metrics from {num_interation} times run: ")
 print(f"Pipeline intialization time: {pipe_init_duration:.3f} s")
 print(f"First input token size: ", input_token_lengths[0])
 print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB")
+print(f"Max USS Memory Usage: {sum(max_uss_mem_list)/num_interation:.2f} MB")
 print(
     f"Average E2E pipeline for {img_size}x{img_size} image generation of {num_interation} iteration took: {sum(pipeline_latency)/num_interation:.2f} s"
 )
