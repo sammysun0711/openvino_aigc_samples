@@ -93,16 +93,18 @@ for i in range(num_interation):
     generation_duration = time.time() - start
     input_token_lengths.append(ov_model.language_model.input_token_length)
     pipeline_latency.append(generation_duration)
-    
+
     mem_consumption.end_collect_momory_consumption()
     max_rss_mem, max_shared_mem, max_uss_mem = (
-            mem_consumption.get_max_memory_consumption()
-        )
+        mem_consumption.get_max_memory_consumption()
+    )
     max_rss_mem_list.append(max_rss_mem)
     mem_consumption.clear_max_memory_consumption()
 
     print(f"First input token size: ", input_token_lengths[-1])
-    print(f"E2E pipeline for {img_size}x{img_size} Image generation took: {generation_duration:.3f} s")
+    print(
+        f"E2E pipeline for {img_size}x{img_size} Image generation took: {generation_duration:.3f} s"
+    )
     print("Max RSS Memory Usage: {:.2f} MB".format(max_rss_mem))
 
 print(f"Save generated image in path: {save_path}")
@@ -110,7 +112,7 @@ images[0].save(save_path)
 
 print("--------------------------------------------")
 print("")
-print(f"== Performance metrics from {num_interation} times run: ")
+print(f"[Summary] Performance metrics from {num_interation} times run: ")
 print(f"Pipeline intialization time: {pipe_init_duration:.3f} s")
 print(f"First input token size: ", input_token_lengths[0])
 print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB")

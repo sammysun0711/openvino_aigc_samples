@@ -65,7 +65,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--use_chunk_streamer",
-    action='store_true',
+    action="store_true",
     help="Whether to use chunk streaming",
 )
 
@@ -122,9 +122,16 @@ inputs_embeds = ov_model.prepare_inputs_embeds(**prepare_inputs)
 input_token_length = inputs_embeds.shape[1]
 
 if args.use_chunk_streamer:
-    streamer = ChunkStreamer(processor.tokenizer, skip_prompt=True, tokens_len=args.token_length, skip_special_tokens=True)
+    streamer = ChunkStreamer(
+        processor.tokenizer,
+        skip_prompt=True,
+        tokens_len=args.token_length,
+        skip_special_tokens=True,
+    )
 else:
-    streamer = TextStreamer(processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
+    streamer = TextStreamer(
+        processor.tokenizer, skip_prompt=True, skip_special_tokens=True
+    )
 
 
 print(f"Question:\n{input_prompt}")
@@ -175,7 +182,7 @@ for i in range(num_interation):
 
 print("--------------------------------------------")
 print("")
-print(f"== Performance metrics from {num_interation} times run: ")
+print(f"[Summary] Performance metrics from {num_interation} times run: ")
 print(f"Pipeline intialization time: {pipe_init_duration:.3f} s")
 print(f"First input token size: ", input_token_length)
 print(f"Generated output token size: ", output_token_lengths[-1])
