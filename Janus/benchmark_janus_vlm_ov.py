@@ -118,7 +118,11 @@ prepare_inputs = processor(
 
 
 # run image encoder to get the image embeddings
+start = time.perf_counter()
 inputs_embeds = ov_model.prepare_inputs_embeds(**prepare_inputs)
+embedings_process_time = (time.perf_counter() - start)*1000
+print(f"Embedding preprocess time: {embedings_process_time} ms")
+
 input_token_length = inputs_embeds.shape[1]
 
 if args.use_chunk_streamer:
@@ -172,7 +176,7 @@ for i in range(num_interation):
         output_token_lengths.append(len(llm_times))
         print(f"First input token size: ", input_token_length)
         print(
-            f"VLM Model First token latency: {llm_times[0]:.2f} ms, Output len: {len(llm_times)}, Average 2nd+ token latency: {avg_token:.2f} ms"
+            f"VLM Model First token latency: {llm_times[0]+embedings_process_time:.2f} ms, Output len: {len(llm_times)}, Average 2nd+ token latency: {avg_token:.2f} ms"
         )
         max_rss_mem, max_shared_mem, max_uss_mem = (
             mem_consumption.get_max_memory_consumption()
@@ -190,7 +194,7 @@ print(f"Pipeline intialization time: {pipe_init_duration:.3f} s")
 print(f"First input token size: ", input_token_length)
 print(f"Generated output token size: ", output_token_lengths[-1])
 avg_token_ft = sum(first_token_t) / len(first_token_t)
-print(f"Average VLM first token latency: {avg_token_ft:.2f} ms")
+print(f"Average VLM first token latency (including embedding process): {avg_token_ft+embedings_process_time:.2f} ms")
 avg_token_av = sum(avg_token_t) / len(avg_token_t)
 print(f"Average VLM 2nd+ token latency: {avg_token_av:.2f} ms")
 avg_token_rate = 1000 / avg_token_av
