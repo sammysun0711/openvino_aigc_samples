@@ -3,6 +3,7 @@ from pathlib import Path
 from janus.models import VLChatProcessor
 from transformers import AutoTokenizer
 from optimum.intel.openvino import OVModelForVisualCausalLM
+import nncf
 
 parser = argparse.ArgumentParser(
     "DeepSeek Janus-Pro Pytorch to OpenVINO Model Conversion Tool",
@@ -25,12 +26,25 @@ parser.add_argument(
     help="Model folder to save converted Janus-Pro OpenVINO Models",
 )
 
+compression_configuration = {
+        "mode": nncf.CompressWeightsMode.INT4_ASYM,
+        "bits": 4,
+        "group_size": 64,
+        "ratio": 1.0,
+}
+
 args = parser.parse_args()
 
 model_id = args.model_id
 save_dir = args.save_dir
 
-model = OVModelForVisualCausalLM.from_pretrained(model_id, export=True, trust_remote_code=True)
+model = OVModelForVisualCausalLM.from_pretrained(
+    model_id,
+    export=True,
+    trust_remote_code=True,
+    load_in_8bit=False,
+    quantization_config=compression_configuration,
+)
 model.save_pretrained(save_dir)
 
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
