@@ -1,12 +1,12 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.5.0+cpu
-
+git+https://github.com/deepseek-ai/Janus
 git+https://github.com/eaidova/optimum-intel@ea/janus
-openvino>=2025.0.0
-openvino-genai>=2025.0.0
-openvino-tokenizers>=2025.0.0
+openvino==2025.0.0
+openvino-genai==2025.0.0
+openvino-tokenizers==2025.0.0
 modelscope
-nncf==2.14
+nncf==2.15
 transformers==4.47.1
 tokenizers==0.21.0
 numpy==1.26
