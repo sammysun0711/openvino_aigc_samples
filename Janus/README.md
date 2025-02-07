@@ -16,16 +16,27 @@ pip install -r requirements.txt
 modelscope download --model deepseek-ai/Janus-Pro-1B --local_dir Janus-Pro-1B
 ```
  
-### 3. Convert Pytorch model to OpenVINO model
+### 3. Convert Pytorch Model to OpenVINO Model
 ```python
 python convert_janus.py -m Janus-Pro-1B -o Janus-Pro-1B-OV
 ```
 
-### 4. Run Janus for multimodal understanding task with OpenVINO
+### 4. Run Janus-Pro for Multimodal Understanding Task with OpenVINO
 ```python
-python run_janus_vlm_ov.py -m Janus-Pro-1B-OV -p "Describe image in details" -i cat_in_box.png -d GPU
+python run_janus_vlm_ov.py -m Janus-Pro-1B-OV -p "Describe image in details" -i images/cat_in_box.png -d GPU
 ```
-### 5. Run Janus for text-to-image task with OpenVINO
+
+### 5. Run Janus-Pro for Text-to-Image Task with OpenVINO
 ```python
 python run_janus_t2i_ov.py -m Janus-Pro-1B-OV -d GPU
+```
+
+### 6. Benchmark Janus-Pro for Multimodal Understanding Task with OpenVINO
+```
+python benchmark_janus_vlm_ov.py -m Janus-Pro-1B-OV/ -d GPU
+```
+
+### 7. Benchmark Janus-Pro for Text-to-Image Task with OpenVINO
+```
+python benchmark_janus_t2i_ov.py -m Janus-Pro-1B-OV/ -d GPU
 ```

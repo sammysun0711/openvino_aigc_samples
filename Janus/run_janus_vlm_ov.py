@@ -41,14 +41,14 @@ parser.add_argument(
     "-i",
     "--image_path",
     type=str,
-    default="cat_in_box.png",
+    default="images/cat_in_box.png",
     help="Path to input image",
 )
 
 parser.add_argument(
     "-mnt",
     "--max_new_tokens",
-    default=100,
+    default=256,
     type=int,
     help="Specify maximum generated tokens counter",
 )
@@ -84,9 +84,17 @@ print(f"Response: \n")
 streamer = TextStreamer(processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
 start = time.time()
+
 model.generate(
-    **inputs, streamer=streamer, max_new_tokens=max_new_tokens, do_sample=False
+    **inputs,
+    max_new_tokens=max_new_tokens,
+    do_sample=False,
+    pad_token_id=processor.tokenizer.eos_token_id,
+    bos_token_id=processor.tokenizer.bos_token_id,
+    eos_token_id=processor.tokenizer.eos_token_id,
+    streamer=streamer,
 )
+
 generation_duration = time.time() - start
 
 print(f"LLM generation took: {generation_duration:.3f} s")
