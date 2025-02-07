@@ -121,6 +121,9 @@ print(f"First input token size: ", input_token_lengths[0])
 print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB")
 print(f"Max USS Memory Usage: {sum(max_uss_mem_list)/num_interation:.2f} MB")
 print(
+    f"First E2E pipeline for {img_size}x{img_size} image generation took: {pipeline_latency[0]:.2f} s"
+)
+print(
     f"Average E2E pipeline for {img_size}x{img_size} image generation of {num_interation} iteration took: {sum(pipeline_latency)/num_interation:.2f} s"
 )
 print("")
