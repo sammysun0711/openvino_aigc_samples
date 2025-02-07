@@ -33,10 +33,10 @@ python run_janus_t2i_ov.py -m Janus-Pro-1B-OV -d GPU
 
 ### 6. Benchmark Janus-Pro for Multimodal Understanding Task with OpenVINO
 ```
-python benchmark_janus_vlm_ov.py -m Janus-Pro-1B-OV/ -d CPU
+python benchmark_janus_vlm_ov.py -m Janus-Pro-1B-OV/ -d GPU
 ```
 
 ### 7. Benchmark Janus-Pro for Text-to-Image Task with OpenVINO
 ```
-python benchmark_janus_t2i_ov.py -m Janus-Pro-1B-OV/ -d CPU
+python benchmark_janus_t2i_ov.py -m Janus-Pro-1B-OV/ -d GPU
 ```

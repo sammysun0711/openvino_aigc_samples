@@ -133,6 +133,7 @@ avg_token_t = []
 max_rss_mem, max_shared_mem, max_uss_mem = None, None, None
 pipeline_latency = []
 max_rss_mem_list = []
+output_token_lengths = []
 mem_consumption = MemConsumption()
 mem_consumption.start_collect_mem_consumption_thread()
 
@@ -160,6 +161,7 @@ for i in range(num_interation):
         first_token_t.append(llm_times[0])
         avg_token = sum(llm_times[1:]) / (len(llm_times) - 1)
         avg_token_t.append(avg_token)
+        output_token_lengths.append(len(llm_times))
         print(f"First input token size: ", input_token_length)
         print(
             f"VLM Model First token latency: {llm_times[0]:.2f} ms, Output len: {len(llm_times)}, Average 2nd+ token latency: {avg_token:.2f} ms"
@@ -176,13 +178,14 @@ print("")
 print(f"== Performance metrics from {num_interation} times run: ")
 print(f"Pipeline intialization time: {pipe_init_duration:.3f} s")
 print(f"First input token size: ", input_token_length)
+print(f"Generated output token size: ", output_token_lengths[-1])
 avg_token_ft = sum(first_token_t) / len(first_token_t)
 print(f"Average VLM first token latency: {avg_token_ft:.2f} ms")
 avg_token_av = sum(avg_token_t) / len(avg_token_t)
 print(f"Average VLM 2nd+ token latency: {avg_token_av:.2f} ms")
 avg_token_rate = 1000 / avg_token_av
 print(f"Average VLM token rate: {avg_token_rate:.2f} t/s")
-print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB", )
+print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB")
 print(
     f"Average E2E pipeline inference time of {num_interation} iteration: {sum(pipeline_latency)/num_interation:.2f} s"
 )
