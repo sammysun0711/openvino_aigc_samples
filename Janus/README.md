@@ -1,5 +1,10 @@
 # DeekSeek Janus-Pro Model Enabling with OpenVINO
 
+### 0. Verified Model Lists
+- [Janus-Pro-1B](https://huggingface.co/deepseek-ai/Janus-Pro-1B)
+- [Janus-Pro-7B](https://huggingface.co/deepseek-ai/Janus-Pro-7B)
+- [Janus-1.3B](https://huggingface.co/deepseek-ai/Janus-1.3B)
+
 ### 1. Setup Environment
 ```bash
 conda create -n janus-ov python=3.10
