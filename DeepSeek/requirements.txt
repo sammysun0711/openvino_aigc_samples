@@ -2,10 +2,9 @@
 torch==2.5.0+cpu
 optimum==1.24.0
 git+https://github.com/huggingface/optimum-intel.git@cd44f82d774da43cb08dec696dcb811d80d5a39a##egg=optimum-intel
---extra-index-url https://storage.openvinotoolkit.org/simple/wheels/pre-release
-openvino==2025.0.0rc3
-openvino-genai==2025.0.0rc3
-openvino-tokenizers==2025.0.0rc3
+openvino==2025.0
+openvino-genai==2025.0
+openvino-tokenizers==2025.0
 modelscope
 nncf==2.14
 transformers==4.47.1
