@@ -4,6 +4,7 @@ import argparse
 from janus.models import VLChatProcessor
 from ov_janus_helper import OVJanusModel, generate_image
 from memory_profile import MemConsumption
+from transformers import set_seed
 
 parser = argparse.ArgumentParser(
     "Benchmark Tools of DeepSeek Janus-Pro OpenVINO Inference for Text-to-Image Generation Task",
@@ -52,7 +53,7 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-
+set_seed(42)
 model_id = args.model_id
 save_path = args.save_path
 device = args.device

@@ -3,6 +3,7 @@ import time
 import argparse
 from janus.models import VLChatProcessor
 from optimum.intel.openvino import OVModelForVisualCausalLM
+from transformers import set_seed
 
 parser = argparse.ArgumentParser(
     "DeepSeek Janus-Pro OpenVINO Inference for Text-to-Image Generation Task",
@@ -43,6 +44,7 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+set_seed(42)
 
 model_id = args.model_id
 save_path = args.save_path
