@@ -144,6 +144,7 @@ avg_token_t = []
 max_rss_mem, max_shared_mem, max_uss_mem = None, None, None
 pipeline_latency = []
 max_rss_mem_list = []
+max_shared_mem_list = []
 max_uss_mem_list = []
 output_token_lengths = []
 mem_consumption = MemConsumption()
@@ -182,9 +183,11 @@ for i in range(num_interation):
             mem_consumption.get_max_memory_consumption()
         )
         max_rss_mem_list.append(max_rss_mem)
+        max_shared_mem_list.append(max_shared_mem)
         max_uss_mem_list.append(max_uss_mem)
-        print("Max RSS Memory usage: {:.2f} MB".format(max_rss_mem))
-        print("Max USS Memory usage: {:.2f} MB".format(max_uss_mem))
+        print("Max RSS Memory Usage: {:.2f} MB".format(max_rss_mem))
+        print("Max Shared Memory Usage: {:.2f} MB".format(max_shared_mem))
+        print("Max USS Memory Usage: {:.2f} MB".format(max_uss_mem))
         mem_consumption.clear_max_memory_consumption()
 
 print("--------------------------------------------")
@@ -200,6 +203,7 @@ print(f"Average VLM 2nd+ token latency: {avg_token_av:.2f} ms")
 avg_token_rate = 1000 / avg_token_av
 print(f"Average VLM token rate: {avg_token_rate:.2f} t/s")
 print(f"Max RSS Memory Usage: {sum(max_rss_mem_list)/num_interation:.2f} MB")
+print(f"Max Shared Memory Usage: {sum(max_shared_mem_list)/num_interation:.2f} MB")
 print(f"Max USS Memory Usage: {sum(max_uss_mem_list)/num_interation:.2f} MB")
 print(
     f"Average E2E pipeline inference time of {num_interation} iteration: {sum(pipeline_latency)/num_interation:.2f} s"
