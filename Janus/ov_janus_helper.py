@@ -42,7 +42,9 @@ def model_has_input_output_name(ov_model: ov.Model, name: str):
     Returns:
       True if input or output with requested name exists else False
     """
-    return name in sum([list(t.get_names()) for t in ov_model.inputs + ov_model.outputs], [])
+    return name in sum(
+        [list(t.get_names()) for t in ov_model.inputs + ov_model.outputs], []
+    )
 
 
 def fuse_cache_reorder(
@@ -75,7 +77,9 @@ def fuse_cache_reorder(
     if model_has_input_output_name(ov_model, "beam_idx"):
         raise ValueError("Model already has fused cache")
     input_batch = ov_model.input("inputs_embeds").get_partial_shape()[0]
-    beam_idx = opset13.parameter(name="beam_idx", dtype=ov.Type.i32, shape=ov.PartialShape([input_batch]))
+    beam_idx = opset13.parameter(
+        name="beam_idx", dtype=ov.Type.i32, shape=ov.PartialShape([input_batch])
+    )
     beam_idx.output(0).get_tensor().add_names({"beam_idx"})  # why list is not accepted?
     ov_model.add_parameters([beam_idx])
     not_kv_inputs.append(ov_model.inputs[-1])
@@ -83,7 +87,9 @@ def fuse_cache_reorder(
     for input_name in key_value_input_names:
         parameter_output_port = ov_model.input(input_name)
         consumers = parameter_output_port.get_target_inputs()
-        gather = opset13.gather(parameter_output_port, beam_idx, opset13.constant(gather_dim))
+        gather = opset13.gather(
+            parameter_output_port, beam_idx, opset13.constant(gather_dim)
+        )
         for consumer in consumers:
             consumer.replace_source_output(gather.output(0))
     ov_model.validate_nodes_and_infer_types()
@@ -109,9 +115,18 @@ def build_state_initializer(ov_model: ov.Model, batch_dim: int):
         if op.get_type_name() == "ReadValue":
             dims = [dim.min_length for dim in list(op.get_output_partial_shape(0))]
             dims[batch_dim] = batch
-            dims = [(opset13.constant(np.array([dim], dtype=np.int64)) if isinstance(dim, int) else dim) for dim in dims]
+            dims = [
+                (
+                    opset13.constant(np.array([dim], dtype=np.int64))
+                    if isinstance(dim, int)
+                    else dim
+                )
+                for dim in dims
+            ]
             shape = opset13.concat(dims, axis=0)
-            broadcast = opset13.broadcast(opset13.constant(0.0, dtype=op.get_output_element_type(0)), shape)
+            broadcast = opset13.broadcast(
+                opset13.constant(0.0, dtype=op.get_output_element_type(0)), shape
+            )
             op.set_arguments([broadcast])
     ov_model.validate_nodes_and_infer_types()
 
@@ -175,7 +190,11 @@ def make_stateful(
 def patch_stateful(ov_model):
     key_value_input_names = [key.get_any_name() for key in ov_model.inputs[2:-1]]
     key_value_output_names = [key.get_any_name() for key in ov_model.outputs[1:]]
-    not_kv_inputs = [input for input in ov_model.inputs if not any(name in key_value_input_names for name in input.get_names())]
+    not_kv_inputs = [
+        input
+        for input in ov_model.inputs
+        if not any(name in key_value_input_names for name in input.get_names())
+    ]
     if not key_value_input_names or not key_value_output_names:
         return
     batch_dim = 0
@@ -228,7 +247,9 @@ def convert_janus_model(model_id, output_dir, quantization_config):
             gen_decoder_path.exists(),
         ]
     ):
-        print(f"✅ {model_name} model already converted. You can find results in {output_dir}")
+        print(
+            f"✅ {model_name} model already converted. You can find results in {output_dir}"
+        )
         return
     print(f"⌛ {model_name} conversion started. Be patient, it may takes some time.")
     print("⌛ Load Original model")
@@ -236,7 +257,9 @@ def convert_janus_model(model_id, output_dir, quantization_config):
     config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
     language_config = config.language_config
     language_config._attn_implementation = "sdpa"
-    vl_gpt: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(model_id, language_config=language_config, trust_remote_code=True)
+    vl_gpt: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
+        model_id, language_config=language_config, trust_remote_code=True
+    )
     vl_gpt = vl_gpt.eval()
     vl_gpt.config.save_pretrained(output_dir)
     processor.save_pretrained(output_dir)
@@ -296,7 +319,12 @@ def convert_janus_model(model_id, output_dir, quantization_config):
         language_model.forward = types.MethodType(forward_wrap, language_model)
         hidden_size = language_model.config.hidden_size
         num_pkv = language_model.config.num_hidden_layers
-        pkv_shape = (2, language_model.config.num_key_value_heads, 2, hidden_size // language_model.config.num_attention_heads)
+        pkv_shape = (
+            2,
+            language_model.config.num_key_value_heads,
+            2,
+            hidden_size // language_model.config.num_attention_heads,
+        )
         position_ids = torch.tensor([[2, 3], [2, 3]])
 
         input_embeds = torch.randn((2, 2, hidden_size))
@@ -308,11 +336,18 @@ def convert_janus_model(model_id, output_dir, quantization_config):
         for i in range(num_pkv):
             kv = [torch.randn(pkv_shape) for _ in range(2)]
             past_key_values.append(kv)
-            input_names.extend([f"past_key_values.{i}.key", f"past_key_values.{i}.value"])
+            input_names.extend(
+                [f"past_key_values.{i}.key", f"past_key_values.{i}.value"]
+            )
             output_names.extend([f"present.{i}.key", f"present.{i}.value"])
         input_names.append("inputs_embeds")
 
-        example_input = {"inputs_embeds": input_embeds, "attention_mask": attention_mask, "position_ids": position_ids, "past_key_values": past_key_values}
+        example_input = {
+            "inputs_embeds": input_embeds,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "past_key_values": past_key_values,
+        }
 
         ov_model = ov.convert_model(
             language_model,
@@ -328,7 +363,9 @@ def convert_janus_model(model_id, output_dir, quantization_config):
         print("✅ Language model successfully converted")
 
         if quantization_config is not None:
-            print(f"⌛ Weights compression with {quantization_config['mode']} mode started")
+            print(
+                f"⌛ Weights compression with {quantization_config['mode']} mode started"
+            )
             ov_model = nncf.compress_weights(ov_model, **quantization_config)
             print("✅ Weights compression finished")
 
@@ -349,12 +386,16 @@ def convert_janus_model(model_id, output_dir, quantization_config):
             images_embeds = self.aligner(self.vision_model(images))
 
             # [b x n, T2, D] -> [b, n x T2, D]
-            images_embeds = rearrange(images_embeds, "(b n) t d -> b (n t) d", b=bs, n=n)
+            images_embeds = rearrange(
+                images_embeds, "(b n) t d -> b (n t) d", b=bs, n=n
+            )
             return images_embeds
 
         vl_gpt.forward = types.MethodType(image_embedding_forward, vl_gpt)
 
-        ov_model = ov.convert_model(vl_gpt, example_input=torch.randn([1, 1, 3, 384, 384]))
+        ov_model = ov.convert_model(
+            vl_gpt, example_input=torch.randn([1, 1, 3, 384, 384])
+        )
         ov.save_model(ov_model, image_embed_path)
         del ov_model
         cleanup_torchscript_cache()
@@ -392,7 +433,13 @@ def convert_janus_model(model_id, output_dir, quantization_config):
         print("⌛ Convert Gen decoder model")
         dec = vl_gpt.gen_vision_model
         dec.forward = dec.decode_code
-        ov_model = ov.convert_model(dec, example_input={"code_b": torch.ones([2, 576], dtype=torch.int64), "shape": torch.tensor([2, 8, 24, 24])})
+        ov_model = ov.convert_model(
+            dec,
+            example_input={
+                "code_b": torch.ones([2, 576], dtype=torch.int64),
+                "shape": torch.tensor([2, 8, 24, 24]),
+            },
+        )
         ov.save_model(ov_model, gen_decoder_path)
         del ov_model
         cleanup_torchscript_cache()
@@ -401,34 +448,58 @@ def convert_janus_model(model_id, output_dir, quantization_config):
     del vl_gpt
     gc.collect()
 
-    print(f"✅ {model_id} model conversion finished. You can find results in {output_dir}")
+    print(
+        f"✅ {model_id} model conversion finished. You can find results in {output_dir}"
+    )
 
 
 class OvModelForCausalLMWithEmb(GenerationMixin):
     def __init__(self, model_dir, device="CPU", ov_config=None, compile=True):
         self._supports_cache_class = False
-        self.config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True).language_config
+        self.config = AutoConfig.from_pretrained(
+            model_dir, trust_remote_code=True
+        ).language_config
         self.config.is_decoder = True
         self.config.is_encoder_decoder = False
         self.generation_config = GenerationConfig.from_model_config(self.config)
         model_dir = Path(model_dir)
-        self.model = core.read_model(model_dir / "openvino_language_model.xml")
-        self.token_emb = core.read_model(model_dir / "openvino_text_embeddings_model.xml")
-        self.lm_head = core.read_model(model_dir / "openvino_lm_head_model.xml")
-        self.request = None
-        self.token_emb_request = None
-        self.lm_head_request = None
+        # self.model = core.read_model(model_dir / "openvino_language_model.xml")
+        # self.model = core.compile_model(model_dir / "openvino_language_model.xml", device, ov_config)
+        # self.token_emb = core.compile_model(model_dir / "openvino_text_embeddings_model.xml", device, ov_config)
+        # self.lm_head = core.compile_model(model_dir / "openvino_lm_head_model.xml", device, ov_config)
+        # self.request = None
+        # self.request = self.model.create_infer_request()
+        self.request = core.compile_model(
+            model_dir / "openvino_language_model.xml", device, ov_config
+        ).create_infer_request()
+        # self.token_emb_request = self.token_emb
+        self.token_emb_request = core.compile_model(
+            model_dir / "openvino_text_embeddings_model.xml", device, ov_config
+        )
+        self.lm_head_request = core.compile_model(
+            model_dir / "openvino_lm_head_model.xml", device, ov_config
+        )
         self._device = device.upper()
         self.device = torch.device("cpu")
         self.ov_config = ov_config
         self.next_beam_idx = None
         self._past_length = None
-        self.input_names = [input_t.get_any_name() for input_t in self.model.inputs]
+        # self.input_names = [input_t.get_any_name() for input_t in self.model.inputs]
+        # self.input_names = [input_t.get_any_name() for input_t in self.model.inputs]
+        self.input_names = [
+            "attention_mask",
+            "position_ids",
+            "inputs_embeds",
+            "beam_idx",
+        ]
+        # print("self.input_names: ", self.input_names)
         self.main_input_name = "input_ids"
-
+        """
         if compile:
             self.compile()
+        """
 
+    """
     def compile(self):
         if self.request is None:
             self.request = core.compile_model(self.model, self._device, self.ov_config).create_infer_request()
@@ -457,9 +528,10 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         self.request = None
         self.token_emb_request = None
         self.lm_head_request = None
+    """
 
     def embed_tokens(self, input_ids: torch.LongTensor):
-        self._compile_token_emb()
+        # self._compile_token_emb()
         res = self.token_emb_request(input_ids, share_inputs=True)
         return res[0]
 
@@ -472,7 +544,9 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
+        batch_size = (
+            input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
+        )
 
         inputs = {}
         # past_key_values are not used explicitly, instead they are handled inside the model
@@ -488,7 +562,9 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         past_len = self._get_past_length(past_key_values)
 
         if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids if past_key_values is None else input_ids[:, -1:])
+            inputs_embeds = self.embed_tokens(
+                input_ids if past_key_values is None else input_ids[:, -1:]
+            )
 
             if hasattr(self.config, "scale_emb"):
                 inputs_embeds = inputs_embeds * self.config.scale_emb
@@ -499,7 +575,10 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
             if attention_mask is not None:
                 attention_mask = np.array(attention_mask)
             else:
-                attention_mask = np.ones((inputs_embeds.shape[0], inputs_embeds.shape[1] + past_len), dtype=int)
+                attention_mask = np.ones(
+                    (inputs_embeds.shape[0], inputs_embeds.shape[1] + past_len),
+                    dtype=int,
+                )
 
         if "attention_mask" in self.input_names:
             inputs["attention_mask"] = attention_mask
@@ -516,7 +595,11 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
             inputs["position_ids"] = position_ids
 
         if "beam_idx" in self.input_names:
-            inputs["beam_idx"] = self.next_beam_idx if self.next_beam_idx is not None else np.arange(batch_size, dtype=int)
+            inputs["beam_idx"] = (
+                self.next_beam_idx
+                if self.next_beam_idx is not None
+                else np.arange(batch_size, dtype=int)
+            )
 
         return inputs
 
@@ -530,7 +613,7 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         **kwargs,
     ):
         # print("===== forward =======")
-        self.compile()
+        # self.compile()
 
         start = time.perf_counter()
         inputs = self.prepare_inputs(
@@ -545,9 +628,11 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         # Run inference
         self.request.start_async(inputs, share_inputs=True)
         self.request.wait()
-        self.llm_times.append((time.perf_counter() - start)*1000)
+        self.llm_times.append((time.perf_counter() - start) * 1000)
         hidden_state = self.request.get_tensor("last_hidden_state").data
-        logits = self.lm_head_request(hidden_state, share_inputs=True, share_outputs=True)[0]
+        logits = self.lm_head_request(
+            hidden_state, share_inputs=True, share_outputs=True
+        )[0]
         logits = torch.from_numpy(logits).to(self.device)
         past_key_values = ((),)
         self._past_length += inputs["inputs_embeds"].shape[1]
@@ -562,8 +647,8 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         inputs_embeds: Optional[torch.LongTensor] = None,
         **kwargs,
     ):
-        #print("===== model forward =======")
-        self.compile()
+        # print("===== model forward =======")
+        # self.compile()
         start = time.perf_counter()
         inputs = self.prepare_inputs(
             input_ids=None,
@@ -577,13 +662,15 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         # Run inference
         self.request.start_async(inputs, share_inputs=True)
         self.request.wait()
-        #self.llm_times.append((time.perf_counter() - start)*1000)
+        # self.llm_times.append((time.perf_counter() - start)*1000)
         hidden_state = self.request.get_tensor("last_hidden_state").data
         self._past_length += inputs["inputs_embeds"].shape[1]
         return hidden_state, ((),)
 
     # Adapted from transformers.models.llama.modeling_llama.LlamaForCausalLM.prepare_inputs_for_generation
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+    def prepare_inputs_for_generation(
+        self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs
+    ):
         # if model is used as a decoder in encoder-decoder model, the decoder attention mask is created on the fly
         attention_mask = kwargs.get("attention_mask", None)
         use_cache = kwargs.get("use_cache", None)
@@ -594,7 +681,11 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
             # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
             # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
             # input)
-            if attention_mask is not None and input_ids is not None and attention_mask.shape[1] > input_ids.shape[1]:
+            if (
+                attention_mask is not None
+                and input_ids is not None
+                and attention_mask.shape[1] > input_ids.shape[1]
+            ):
                 input_ids = input_ids[:, -(attention_mask.shape[1] - past_len) :]
             # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
             # input_ids based on the past_length.
@@ -602,7 +693,11 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
                 input_ids = input_ids[:, past_len:]
             # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens
         position_ids = kwargs.get("position_ids", None)
-        if attention_mask is not None and position_ids is None and "position_ids" in self.input_names:
+        if (
+            attention_mask is not None
+            and position_ids is None
+            and "position_ids" in self.input_names
+        ):
             # create position_ids on the fly for batch generation
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
@@ -626,13 +721,17 @@ class OvModelForCausalLMWithEmb(GenerationMixin):
         return self._past_length
 
     # Adapted from transformers.models.gpt2.modeling_gpt2.GPT2LMHeadModel._reorder_cache
-    def _reorder_cache(self, past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor) -> Tuple[Tuple[torch.Tensor]]:
+    def _reorder_cache(
+        self, past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor
+    ) -> Tuple[Tuple[torch.Tensor]]:
         """
         This function is used to re-order the `past_key_values` cache if [`~PreTrainedModel.beam_search`] or
         [`~PreTrainedModel.beam_sample`] is called.
         This is required to match `past_key_values` with the correct beam_idx at every generation step.
         """
-        self.next_beam_idx = np.array(beam_idx)  # save beam_idx to be used as an input in the next iteration
+        self.next_beam_idx = np.array(
+            beam_idx
+        )  # save beam_idx to be used as an input in the next iteration
         return past_key_values
 
     def can_generate(self):
@@ -648,10 +747,18 @@ class OVJanusModel:
     def __init__(self, model_dir, device, ov_config=None, llm_times=[]):
         model_dir = Path(model_dir)
         self.language_model = OvModelForCausalLMWithEmb(model_dir, device, ov_config)
-        self.vision_embeddings = core.compile_model(model_dir / "openvino_vision_embeddings_model.xml", device, ov_config)
-        self.gen_embeddings = core.compile_model(model_dir / "openvino_vision_gen_embeddings_model.xml", device, ov_config)
-        self.gen_decoder = core.compile_model(model_dir / "openvino_vision_gen_decoder_model.xml", device, ov_config)
-        self.gen_head = core.compile_model(model_dir / "openvino_vision_gen_head_model.xml", device, ov_config)
+        self.vision_embeddings = core.compile_model(
+            model_dir / "openvino_vision_embeddings_model.xml", device, ov_config
+        )
+        self.gen_embeddings = core.compile_model(
+            model_dir / "openvino_vision_gen_embeddings_model.xml", device, ov_config
+        )
+        self.gen_decoder = core.compile_model(
+            model_dir / "openvino_vision_gen_decoder_model.xml", device, ov_config
+        )
+        self.gen_head = core.compile_model(
+            model_dir / "openvino_vision_gen_head_model.xml", device, ov_config
+        )
         self.language_model.llm_times = llm_times
 
     def prepare_inputs_embeds(
@@ -704,7 +811,9 @@ def vl_conversation(ov_model, processor, input_prompt, image_path, streamer=None
         {"role": "Assistant", "content": ""},
     ]
     pil_images = load_pil_images(conversation)
-    prepare_inputs = processor(conversations=conversation, images=pil_images, force_batchify=True)
+    prepare_inputs = processor(
+        conversations=conversation, images=pil_images, force_batchify=True
+    )
 
     # # run image encoder to get the image embeddings
     inputs_embeds = ov_model.prepare_inputs_embeds(**prepare_inputs)
@@ -727,7 +836,9 @@ def vl_conversation(ov_model, processor, input_prompt, image_path, streamer=None
         **generation_kwargs,
     )
 
-    answer = processor.tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
+    answer = processor.tokenizer.decode(
+        outputs[0].cpu().tolist(), skip_special_tokens=True
+    )
     return answer
 
 
@@ -769,11 +880,15 @@ def generate_image(
     inputs_embeds = ov_model.language_model.embed_tokens(tokens)
     ov_model.language_model.input_token_length = inputs_embeds.shape[1]
 
-    generated_tokens = torch.zeros((parallel_size, image_token_num_per_image), dtype=torch.int)
+    generated_tokens = torch.zeros(
+        (parallel_size, image_token_num_per_image), dtype=torch.int
+    )
     past_key_values = None
 
     for i in tqdm(range(image_token_num_per_image)):
-        outputs = ov_model.language_model.model_forward(inputs_embeds=inputs_embeds, use_cache=True, past_key_values=past_key_values)
+        outputs = ov_model.language_model.model_forward(
+            inputs_embeds=inputs_embeds, use_cache=True, past_key_values=past_key_values
+        )
         hidden_states = torch.from_numpy(outputs[0])
         past_key_values = outputs[1]
         logits = torch.from_numpy(ov_model.gen_head(hidden_states[:, -1, :])[0])
@@ -786,10 +901,19 @@ def generate_image(
         next_token = torch.multinomial(probs, num_samples=1)
         generated_tokens[:, i] = next_token.squeeze(dim=-1)
 
-        next_token = torch.cat([next_token.unsqueeze(dim=1), next_token.unsqueeze(dim=1)], dim=1).view(-1)
+        next_token = torch.cat(
+            [next_token.unsqueeze(dim=1), next_token.unsqueeze(dim=1)], dim=1
+        ).view(-1)
         img_embeds = torch.from_numpy(ov_model.prepare_gen_img_embeds(next_token))
         inputs_embeds = img_embeds.unsqueeze(dim=1)
-    dec = ov_model.gen_decoder([generated_tokens.to(dtype=torch.int), np.array([parallel_size, 8, img_size // patch_size, img_size // patch_size])])[0]
+    dec = ov_model.gen_decoder(
+        [
+            generated_tokens.to(dtype=torch.int),
+            np.array(
+                [parallel_size, 8, img_size // patch_size, img_size // patch_size]
+            ),
+        ]
+    )[0]
     dec = np.transpose(dec, (0, 2, 3, 1))
 
     dec = np.clip((dec + 1) / 2 * 255, 0, 255)
@@ -810,6 +934,7 @@ def generate_image(
             images[-1].save(save_path)
 
     return images
+
 
 class ChunkStreamer(BaseStreamer):
     """
@@ -845,7 +970,13 @@ class ChunkStreamer(BaseStreamer):
         ```
     """
 
-    def __init__(self, tokenizer: "AutoTokenizer", skip_prompt: bool = False, tokens_len = 1, **decode_kwargs):
+    def __init__(
+        self,
+        tokenizer: "AutoTokenizer",
+        skip_prompt: bool = False,
+        tokens_len=1,
+        **decode_kwargs,
+    ):
         self.tokenizer = tokenizer
         self.skip_prompt = skip_prompt
         self.decode_kwargs = decode_kwargs
