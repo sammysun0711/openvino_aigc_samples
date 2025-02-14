@@ -66,6 +66,7 @@ dtype_mapping = {
     torch.int64: ov.Type.i64,
 }
 
+core = ov.Core()
 
 def get_pipeline_components(
     use_hypersd,
@@ -1436,7 +1437,7 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-                start = time.perf_counter()
+                # start = time.perf_counter()
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = (
                     torch.cat([latents] * 2)
@@ -1463,20 +1464,19 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                 print("timestep.shape: ", timestep)
                 """
                 # print("controlnet_inputs: ", controlnet_inputs)
+                """
                 prepare_controlnet_input_dur = time.perf_counter() - start
                 print(
                     f"Prepare controlnet input duration, elapsed {prepare_controlnet_input_dur:.03f} secs. "
                 )
-
+                """
                 start = time.perf_counter()
                 controlnet_outputs = self.controlnet(controlnet_inputs)
                 # print("controlnet_outputs: ", controlnet_outputs)
                 controlnet_inference_duration = time.perf_counter() - start
-                print(
-                    f"Controlnet inference duration, elapsed {controlnet_inference_duration:.03f} secs. "
-                )
+                # print(f" Controlnet inference duration, elapsed {controlnet_inference_duration:.03f} secs. ")
 
-                start = time.perf_counter()
+                #start = time.perf_counter()
                 # print("self.transformer.inputs:", self.transformer.inputs)
                 transformer_inputs = {
                     "hidden_states": latent_model_input,
@@ -1496,19 +1496,17 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
                     transformer_inputs[
                         CONTROL_BLOCK_SAMPLE_LARER_PREFIX + str(i + 1)
                     ] = controlnet_outputs[i]
-
+                """
                 prepare_transformer_input_dur = time.perf_counter() - start
                 print(
                     f"Prepare transformer input duration, elapsed {prepare_transformer_input_dur:.03f} secs. "
                 )
-
+                """
                 start = time.perf_counter()
                 noise_pred = torch.from_numpy(self.transformer(transformer_inputs)[0])
                 transformer_inference_duration = time.perf_counter() - start
 
-                print(
-                    f"Transformer inference duration, elapsed {transformer_inference_duration:.03f} secs. "
-                )
+                # print(f"Transformer inference duration, elapsed {transformer_inference_duration:.03f} secs. ")
 
                 # print("noise_pred: ", noise_pred)
 
@@ -1569,25 +1567,34 @@ class OVStableDiffusion3ControlNetPipeline(DiffusionPipeline):
 
         return StableDiffusion3PipelineOutput(images=image)
 
+import openvino.properties as props
 
 def init_sd3_controlnet_pipeline(
     models_dict: Dict[str, Any], device: str, text_encoder_3_dim=4096
 ):
     pipeline_args = {}
-
-    ov_config = {"CACHE_DIR": "model_cache"}
+    ov_config = {}
+    if args.cache_mode.upper() == "OPTIMIZE_SIZE":
+        print("Model cahce mode: OPTIMIZE_SIZE")
+        core.set_property({"CACHE_DIR": "model_cache_optimize_size", "CACHE_MODE": "OPTIMIZE_SIZE"})
+    elif args.cache_mode.upper() == "OPTIMIZE_SPEED":
+        print("Model cahce mode: OPTIMIZE_SPEED")
+        core.set_property({"CACHE_DIR": "model_cache_optimzie_speed", "CACHE_MODE": "OPTIMIZE_SPEED"})
+    else:
+        print("Model cache: default")
+        core.set_property({"CACHE_DIR": "model_cache"})
     if "GPU" in device:
         ov_config["INFERENCE_PRECISION_HINT"] = "f16"
         ov_config["ACTIVATIONS_SCALE_FACTOR"] = "10"
 
-    print("Models compilation")
-    core = ov.Core()
+    print("Models compilation started ...")
     for model_name, model_path in models_dict.items():
+        # core.set_property({props.cache_dir: f"model_cache_speed/{model_name}_cache.blob"})
         pipeline_args[model_name] = core.compile_model(
-            model_path, device, ov_config if "text_encoder" in model_name else {}
+            model_path, device, ov_config if "text_encoder_3" in model_name else {}
         )
         print(f"{model_name} - Done!")
-
+    print("Models compilation finished!")
     scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(MODEL_DIR / "scheduler")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR / "tokenizer")
@@ -1684,6 +1691,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether use INT8 quantized transformer model",
     )
+    parser.add_argument(
+        "--num_image_generation",
+        default=4,
+        action="store_true",
+        help="Specify number of image generation for performance evaluation",
+    )
+    parser.add_argument(
+        "--num_inference_steps",
+        default=4,
+        type=int,
+        help="Specify how many LCM generation steps",
+    )
+    parser.add_argument(
+        "--cache_mode",
+        default="optimize_size",
+        type=str,
+        help="Specify which cache mode for weightless cache, option `optimize_speed` or 'optimize_size' (by default)",
+    )
     args = parser.parse_args()
     print("Args: ", args)
     print("OpenVINO version: ", ov.get_version())
@@ -1744,13 +1769,13 @@ if __name__ == "__main__":
     control_image = load_image(controlnet_image_path)
 
     generator = torch.Generator(device="cpu").manual_seed(seed)
-    print("Image generation start ...")
+    print(f"Image generation start for {args.num_image_generation} images ...")
     start = time.perf_counter()
     image = ov_pipe(
         prompt,
         negative_prompt=n_prompt,
         control_image=control_image,
-        num_inference_steps=4,
+        num_inference_steps=args.num_inference_steps,
         controlnet_conditioning_scale=0.5,
         guidance_scale=guidance_scale,
         generator=generator,
@@ -1759,7 +1784,26 @@ if __name__ == "__main__":
     ).images[0]
 
     inference_duration = time.perf_counter() - start
-    print(f"Image generation finished, elapsed {inference_duration:.03f} secs. ")
+
+    print(f"==== First Image generation finished, elapsed {inference_duration:.03f} secs. ====\n")
+
+    infer_count = args.num_image_generation - 1
+    start = time.perf_counter()
+    for i in range(infer_count):
+        image = ov_pipe(
+            prompt,
+            negative_prompt=n_prompt,
+            control_image=control_image,
+            num_inference_steps=args.num_inference_steps,
+            controlnet_conditioning_scale=0.5,
+            guidance_scale=guidance_scale,
+            generator=generator,
+            height=height,
+            width=width,
+        ).images[0]
+    inference_duration = time.perf_counter() - start
+
+    print(f"==== Average Image generation finished, elapsed {(inference_duration/infer_count):.03f} secs. ====\n")
     image.save(
         f"results/ov_sd3_controlnet_{controlnet_type}_guidance_scale_{guidance_scale}_{height}x{width}_seed_{seed}.jpg"
     )
