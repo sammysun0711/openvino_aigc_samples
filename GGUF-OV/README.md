@@ -19,43 +19,43 @@ conda activate gguf-ov
 pip install -r requirements.txt 
 ```
 
-### 2. Download GGUF model and converted OpenVINO Tokenizer models
+### 2. Download GGUF model and convert OpenVINO Tokenizer models
 ```bash
-python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-0.5B-Instruct-GGUF -f qwen2.5-0.5b-instruct-q4_0.gguf -d CPU -o gguf_models -p "Who are you?" -cd "model_cache" -mnt 128
+python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-1B-Instruct-GGUF -f qwen2.5-1b-instruct-q4_k_m.gguf -d GPU -o gguf_models -p "What is OpenVINO?" -cd "model_cache"
 ```
-Download GGUF model from model_id: Qwen/Qwen2.5-0.5B-Instruct-GGUF, filename: qwen2.5-0.5b-instruct-q4_0.gguf to gguf_models ...
-Download GGUF model finished, elapsed: 1654.478 ms
+Download GGUF model from model_id: Qwen/Qwen2.5-1.5B-Instruct-GGUF, filename: qwen2.5-1.5b-instruct-q4_k_m.gguf to gguf_models ...
+qwen2.5-1.5b-instruct-q4_k_m.gguf: 100%|███████████████████████████████████████████████████| 1.12G/1.12G [00:33<00:00, 33.6MB/s]
+Download GGUF model finished, elapsed: 35554.653 ms
 
-Convert OpenVINO tokenizer from GGUF model: Qwen/Qwen2.5-0.5B-Instruct-GGUF, filename: qwen2.5-0.5b-instruct-q4_0.gguf to gguf_models ...
-Convert OpenVINO tokenizer finished, elapsed: 17003.100 ms
-Loading and unpacking model from: gguf_models/qwen2.5-0.5b-instruct-q4_0.gguf
-Loading and unpacking model done. Time: 261ms
+Convert OpenVINO tokenizer from GGUF model: Qwen/Qwen2.5-1.5B-Instruct-GGUF, filename: qwen2.5-1.5b-instruct-q4_k_m.gguf to gguf_models ...
+Convert OpenVINO tokenizer finished, elapsed: 36055.765 ms
+Loading and unpacking model from: gguf_models\qwen2.5-1.5b-instruct-q4_k_m.gguf
+Loading and unpacking model done. Time: 5859ms
 Start generating OV model...
-Model generation done. Time: 314ms
+Model generation done. Time: 721ms
 
 Prompt:  Who are you?
 Start generation ...
-
-Response:  I am Qwen, a large language model created by Alibaba Cloud. I am a language model designed to assist users in generating human-like text, such as writing articles, stories, and even writing books. I am trained on a vast corpus of text data, including books, articles, and other written works. I am also trained on a large corpus of human language data, including written and spoken language. I am designed to provide information and insights to users, and to assist them in their tasks and goals. I am a tool that can be used to help users with their needs and to provide them with a better understanding of the world.
-
-```
+I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
+Response:  I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
 
 ```
-### 3. Run inference with GGUF with OpenVINO GenAI on-the-fly
+
+```
+### 3. Run inference with GGUF with OpenVINO GenAI with GPU on-the-fly
 ```bash
-python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-0.5B-Instruct-GGUF -f qwen2.5-0.5b-instruct-q4_0.gguf -d CPU -o gguf_models -p "Who are you?" -cd "model_cache" -mnt 128
+python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-1.5B-Instruct-GGUF -f qwen2.5-1.5b-instruct-q4_0.gguf -d GPU -o gguf_models -p "What is OpenVINO?" -cd "model_cache"
 ```
 ```
-Found GGUF model in path: gguf_models/qwen2.5-0.5b-instruct-q4_0.gguf, skip downloading.
-Found converted OpenVINO tokenizer models in path: gguf_models/openvino_tokenizer.xml.
-Loading and unpacking model from: gguf_models/qwen2.5-0.5b-instruct-q4_0.gguf
-Loading and unpacking model done. Time: 209ms
+Found GGUF model in path: gguf_models\qwen2.5-1.5b-instruct-q4_k_m.gguf, skip downloading.
+Found converted OpenVINO tokenizer models in path: gguf_models\openvino_tokenizer.xml.
+Loading and unpacking model from: gguf_models\qwen2.5-1.5b-instruct-q4_k_m.gguf
+Loading and unpacking model done. Time: 5604ms
 Start generating OV model...
-Model generation done. Time: 298ms
+Model generation done. Time: 728ms
 
 Prompt:  Who are you?
 Start generation ...
-
-Response:  I am Qwen, a large language model created by Alibaba Cloud. I am a language model designed to assist users in generating human-like text, such as writing articles, stories, and even writing books. I am trained on a vast corpus of text data, including books, articles, and other written works. I am also trained on a large corpus of internet text, including web pages, blogs, and other written content. I am designed to provide information and insights to users, and to help users with their queries and tasks. I am a language model that can understand and generate human-like text, and can be used to create content,
-
+I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
+Response:  I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
 ```
