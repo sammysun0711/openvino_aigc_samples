@@ -87,8 +87,8 @@ def main():
     pipe.start_chat()
     print("\nPrompt: ", args.prompt)
     print("Start generation ...")
-    response = pipe.generate(args.prompt, config, streamer)
-    print("\nResponse: ", response)
+    print("\nResponse: \n")
+    pipe.generate(args.prompt, config, streamer)
     pipe.finish_chat()
 
 

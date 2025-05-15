@@ -7,3 +7,4 @@ This repo provieds OpenVINO Samples for Popular AIGC Applications, including mod
 - Stable Diffusion 3 + Contronet Sample: [StableDiffusion3](/StableDiffusion3/README.md)
 - DeepSeek-R1: [DeepSeek-R1](/DeepSeek/README.md)
 - Janus-Pro: [Janus](/Janus/README.md)
+- GGUF-OV: [GGUF-OV](/GGUF-OV/README.md)
