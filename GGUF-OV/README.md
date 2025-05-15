@@ -41,8 +41,6 @@ I am Qwen, a large language model created by Alibaba Cloud. I am designed to ass
 Response:  I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
 
 ```
-
-```
 ### 3. Run inference with GGUF with OpenVINO GenAI with GPU on-the-fly
 ```bash
 python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-1.5B-Instruct-GGUF -f qwen2.5-1.5b-instruct-q4_0.gguf -d GPU -o gguf_models -p "What is OpenVINO?" -cd "model_cache"
