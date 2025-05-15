@@ -23,6 +23,7 @@ pip install -r requirements.txt
 ```bash
 python run_gguf_with_ov_genai.py -m Qwen/Qwen2.5-1B-Instruct-GGUF -f qwen2.5-1b-instruct-q4_k_m.gguf -d GPU -o gguf_models -p "What is OpenVINO?" -cd "model_cache"
 ```
+```
 Download GGUF model from model_id: Qwen/Qwen2.5-1.5B-Instruct-GGUF, filename: qwen2.5-1.5b-instruct-q4_k_m.gguf to gguf_models ...
 qwen2.5-1.5b-instruct-q4_k_m.gguf: 100%|███████████████████████████████████████████████████| 1.12G/1.12G [00:33<00:00, 33.6MB/s]
 Download GGUF model finished, elapsed: 35554.653 ms
