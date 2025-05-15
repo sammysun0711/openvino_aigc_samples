@@ -39,7 +39,6 @@ Prompt:  Who are you?
 Start generation ...
 I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
 Response:  I am Qwen, a large language model created by Alibaba Cloud. I am designed to assist with a wide range of tasks and provide helpful responses to your queries. How can I assist you today?
-
 ```
 ### 3. Run inference with GGUF with OpenVINO GenAI with GPU on-the-fly
 ```bash
