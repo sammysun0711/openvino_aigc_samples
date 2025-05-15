@@ -1,4 +1,4 @@
-# Run GGUF Model Inference with OpenVINO GenAI via GGUF Reader On-the-Fly
+# Run GGUF Model Inference with OpenVINO GenAI On-the-Fly
 
 This sample aims to show how to run GGUF model inference from [llama.cpp](https://github.com/ggml-org/llama.cpp) with [OpenVINO GenAI](https://github.com/openvinotoolkit/openvino.genai) on-the-fly, this method provides following benefits: 
 
