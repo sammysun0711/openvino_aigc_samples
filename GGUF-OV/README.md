@@ -3,7 +3,7 @@
 This sample aims to show how to run GGUF model inference from [llama.cpp](https://github.com/ggml-org/llama.cpp) with [OpenVINO GenAI](https://github.com/openvinotoolkit/openvino.genai) on-the-fly, this method provides following benefits: 
 
 - Direct GGUF Compressed Model supported (Q4_K_M/Q4_0/Q8_0/F16) without GGUF Model->Pytorch Model->OpenVINO IR conversion, which can significate reduce model conversion time and memory usage.
-- Smoothless leverage Large Language Model (LLM) pipeline optimization across intel xPU (CPU/GPU/NPU) platform (MTL/LNL/ARL and beyond).
+- Unblock GGUF community to leverage Large Language Model (LLM) pipeline optimization across intel xPU (CPU/GPU/NPU) platform (MTL/LNL/ARL and beyond).
 
 ### 0. Verfied models:
 - [Qwen/Qwen2.5-0.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF)
