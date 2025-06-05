@@ -1,12 +1,12 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.0+cpu
-optimum==1.24.0
-git+https://github.com/huggingface/optimum-intel.git@cd44f82d774da43cb08dec696dcb811d80d5a39a##egg=optimum-intel
-openvino==2025.0
-openvino-genai==2025.0
-openvino-tokenizers==2025.0
+torch==2.6.0+cpu
+optimum==1.25
+optimum-intel==1.23
+openvino==2025.1
+openvino-genai==2025.1
+openvino-tokenizers==2025.1
 modelscope
-nncf==2.14
+nncf==2.16
 transformers==4.47.1
 tokenizers==0.21.0
 numpy==1.26
