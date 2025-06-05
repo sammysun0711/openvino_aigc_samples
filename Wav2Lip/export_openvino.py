@@ -3,6 +3,7 @@ import os
 import openvino as ov
 from pathlib import Path
 import torch
+from torch.utils.model_zoo import load_url
 from face_detection.detection.sfd.net_s3fd import s3fd
 from models import Wav2Lip
 
